@@ -16,6 +16,9 @@
 - 新增 `verifyChallengeMigration`，并接入 `build/check`：验证章节数据往返、旧数据重复导入、施工和厨师状态、归档精简、归档后不复活。`gradle.bat build --offline -I .tools/local-maven.init.gradle --no-daemon --console=plain` 通过。
 - 对 `run/saves` 中 12 个已有旧存档文件执行只读迁移往返检查：包含活动记录及已完成记录；记录数量、活动状态 NBT、重复导入均通过。旧集合字段 `PreservedBattlefieldBlocks` 的数组顺序可能改变，检查按集合内容比较，未发现数据差异。执行时不写这些世界文件。
 
-## 待验收
+## 2026-10-17：M2 独立世界副本运行验收
 
-M2 尚未在世界副本上实际执行旧存档导入、保存和重启。首次运行新版本前备份世界；需分别选取施工中、清理中和已完成的旧记录检查迁移。游戏内验证完成前，不将本次构建视为 M2 运行验收。
+- 经用户授权，使用隔离的 NeoForge `runServer` 目录（`.tools/m2-runtime-20261017` 和 `.tools/m2-cleanup-runtime-20261017`），从 `run/saves` 复制旧世界。原世界不作为服务端运行目录；两份副本的旧比赛文件与原文件 SHA-256 相同。
+- `新的世界 (10)` 含一条已完成、一条中断中的比赛。服务端成功加载依赖与旧世界；执行 `save-all flush` 后生成 `culinary_cataclysm_challenges.dat`，得到 Active 1、History 1。正常停服、重启、再保存后仍为 Active 1、History 1；Ignis 的身份、恢复阶段、施工游标、厨师库存和证据数量匹配旧记录，重复导入不会增加记录。
+- `新的世界 (8)` 的旧比赛处于 `CLEANUP`。隔离服务端加载、保存、正常停服成功；新 Store 为 Active 1、History 0，清理阶段和游标匹配旧记录。此副本没有模拟玩家进入或清理直至结束。
+- 再次执行 `build` 与两份已写盘 Store 的针对性读取检查，均通过。上述证据验证 M2 的服务器存档迁移、保存和一次重启；不替代客户端画面、玩家交互或奖励结算的游戏内验证。

@@ -25,7 +25,11 @@ tasks.register('verifyChallengeMigration', JavaExec) {
     dependsOn tasks.testClasses
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'cn.sake_yez.culinarycataclysm.challenge.ChallengeMigrationCheck'
-    if (project.hasProperty('m2LegacyData')) args project.property('m2LegacyData').toString().split(';')
+    if (project.hasProperty('m2MigratedData')) {
+        args '--migrated', project.property('m2MigratedData').toString(), project.property('m2LegacyData').toString()
+    } else if (project.hasProperty('m2LegacyData')) {
+        args project.property('m2LegacyData').toString().split(';')
+    }
 }
 tasks.named('check') { dependsOn tasks.named('verifyChallengeMigration') }
 processResources {

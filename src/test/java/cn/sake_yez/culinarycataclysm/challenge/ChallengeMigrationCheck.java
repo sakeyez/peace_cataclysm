@@ -75,8 +75,61 @@ public final class ChallengeMigrationCheck {
         IgnisLegacyMigration.importInto(store, List.of(oldCompleted));
         require(store.active().isEmpty() && store.historical(oldCompleted.competitionId).orElseThrow().result()
                 == ChallengeResult.SUCCESS, "completed legacy result was not archived");
-        for (String file : args) verifyRealLegacyFile(Path.of(file));
+        if (args.length == 3 && args[0].equals("--migrated")) {
+            verifyMigratedFile(Path.of(args[1]), Path.of(args[2]));
+        } else {
+            for (String file : args) verifyRealLegacyFile(Path.of(file));
+        }
         System.out.println("Challenge migration checks passed");
+    }
+
+    private static void verifyMigratedFile(Path migratedPath, Path legacyPath) throws IOException {
+        CompoundTag migratedRoot = NbtIo.readCompressed(migratedPath, NbtAccounter.unlimitedHeap());
+        ChallengeStore store = ChallengeStore.load(migratedRoot.getCompound("data"), null);
+        ListTag historyTags = migratedRoot.getCompound("data").getList("History", Tag.TAG_COMPOUND);
+        for (int i = 0; i < historyTags.size(); i++) {
+            require(!historyTags.getCompound(i).contains("ChapterData"), "runtime history retained chapter state");
+        }
+        CompoundTag legacyRoot = NbtIo.readCompressed(legacyPath, NbtAccounter.unlimitedHeap());
+        ListTag oldTags = legacyRoot.getCompound("data").getList("Competitions", Tag.TAG_COMPOUND);
+        List<CompetitionRecord> oldRecords = new ArrayList<>();
+        for (int i = 0; i < oldTags.size(); i++) oldRecords.add(CompetitionRecord.load(oldTags.getCompound(i)));
+        require(store.active().size() + store.history().size() == oldRecords.size(), "runtime migration count changed");
+        for (CompetitionRecord old : oldRecords) {
+            if (old.state == CompetitionState.COMPLETED) {
+                ChallengeHistory historical = store.historical(old.competitionId).orElseThrow();
+                require(historical.result() == IgnisChallengeCodec.fromRecord(old, null, 0).result(),
+                        "completed runtime result changed");
+            } else {
+                Challenge challenge = store.byId(old.competitionId).orElse(null);
+                if (challenge == null) {
+                    ChallengeHistory historical = store.historical(old.competitionId).orElse(null);
+                    require(old.state == CompetitionState.CLEANUP && historical != null,
+                            "active legacy challenge disappeared during runtime migration");
+                    require(historical.result() == IgnisChallengeCodec.fromRecord(old, null, 0).result(),
+                            "cleanup result changed during runtime migration");
+                } else {
+                    require(challenge.result() == IgnisChallengeCodec.fromRecord(old, null, 0).result(),
+                            "active runtime result changed");
+                    CompetitionRecord restored = IgnisChallengeCodec.toRecord(challenge);
+                    require(restored.playerId.equals(old.playerId) && restored.ignisId.equals(old.ignisId),
+                            "runtime identity changed");
+                    require(restored.state == old.state && restored.interruptedState == old.interruptedState,
+                            "runtime recovery phase changed");
+                    require(restored.buildCursor == old.buildCursor
+                            && restored.cleanupTargetCount == old.cleanupTargetCount, "runtime build cursor changed");
+                    require(restored.blazeInventory.equals(old.blazeInventory)
+                            && restored.dishEvidence.size() == old.dishEvidence.size(), "runtime ledger changed");
+                }
+            }
+        }
+        int active = store.active().size();
+        int history = store.history().size();
+        IgnisLegacyMigration.importInto(store, oldRecords);
+        require(store.active().size() == active && store.history().size() == history,
+                "runtime restart would import legacy records again");
+        System.out.println("Runtime SavedData verified: " + migratedPath + " (active=" + active
+                + ", history=" + history + ")");
     }
 
     private static void verifyRealLegacyFile(Path path) throws IOException {
@@ -116,7 +169,10 @@ public final class ChallengeMigrationCheck {
                 }
             }
         }
-        System.out.println("Legacy NBT verified: " + path + " (active=" + active + ", history=" + history + ")");
+        String phases = records.stream().map(record -> record.state + ":" + record.buildCursor)
+                .collect(java.util.stream.Collectors.joining(","));
+        System.out.println("Legacy NBT verified: " + path + " (active=" + active + ", history=" + history
+                + ", phases=" + phases + ")");
     }
 
     private static void require(boolean condition, String message) {
