@@ -1,5 +1,7 @@
 package cn.sake_yez.culinarycataclysm.competition;
 
+import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisCookeryStations;
+
 import cn.sake_yez.culinarycataclysm.integration.CookeryIntegration;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -35,7 +37,7 @@ public final class CookingProcessTracker {
     public void beforeStationInteraction(ServerPlayer player, CompetitionRecord record, BlockPos station) {
         CookeryIntegration.RecipeFacts facts = CookeryIntegration.recipeFactsUnchecked(
                 player.serverLevel().getServer(), record.currentRecipe());
-        if (!facts.supported() || !CookeryIntegration.isTaggedPlayerStation(player.serverLevel(), station, record)) return;
+        if (!facts.supported() || !IgnisCookeryStations.isTaggedPlayerStation(player.serverLevel(), station, record)) return;
         CookeryIntegration.StationSnapshot snapshot = CookeryIntegration.inspectStation(player.serverLevel(), station, facts);
         long gameTime = player.serverLevel().getGameTime();
         InteractionKey key = new InteractionKey(player.getUUID(), station.immutable());

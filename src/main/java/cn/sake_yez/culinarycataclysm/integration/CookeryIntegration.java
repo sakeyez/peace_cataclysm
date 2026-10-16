@@ -1,8 +1,5 @@
 package cn.sake_yez.culinarycataclysm.integration;
 
-import cn.sake_yez.culinarycataclysm.CulinaryCataclysm;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.ServingTable;
 import com.github.ysbbbbbb.kaleidoscopecookery.api.blockentity.IPot;
 import com.github.ysbbbbbb.kaleidoscopecookery.api.blockentity.IStockpot;
 import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.PotBlockEntity;
@@ -10,8 +7,6 @@ import com.github.ysbbbbbb.kaleidoscopecookery.blockentity.kitchen.StockpotBlock
 import com.github.ysbbbbbb.kaleidoscopecookery.crafting.recipe.FlexPotRecipe;
 import com.github.ysbbbbbb.kaleidoscopecookery.crafting.recipe.PotRecipe;
 import com.github.ysbbbbbb.kaleidoscopecookery.item.quality.QualityUtils;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -22,15 +17,12 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.neoforged.fml.ModList;
 
 import java.io.IOException;
-import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class CookeryIntegration {
-    public static final ResourceLocation IGNIS = id("cataclysm", "ignis");
     public static final ResourceLocation POT = id("kaleidoscope_cookery", "pot");
     public static final ResourceLocation STOCKPOT = id("kaleidoscope_cookery", "stockpot");
     public static final ResourceLocation STOVE = id("kaleidoscope_cookery", "stove");
@@ -38,33 +30,7 @@ public final class CookeryIntegration {
     public static final ResourceLocation OIL = id("kaleidoscope_cookery", "oil");
     public static final ResourceLocation KITCHEN_SHOVEL = id("kaleidoscope_cookery", "kitchen_shovel");
     public static final ResourceLocation STOCKPOT_LID = id("kaleidoscope_cookery", "stockpot_lid");
-    private static final ResourceLocation ROUND_CONFIG = id(CulinaryCataclysm.MOD_ID, "culinary_competition/rounds.json");
-    private static final String COMPETITION_TAG = "CulinaryCataclysmCompetition";
-    private static final String OWNER_TAG = "CulinaryCataclysmOwner";
-    private static final String PLAYER_STATION_TAG = "CulinaryCataclysmPlayerStation";
-
     private CookeryIntegration() {
-    }
-
-    public static List<ResourceLocation> resolveConfiguredRecipes(MinecraftServer server) throws IOException {
-        List<ResourceLocation> result = new ArrayList<>();
-        try (Reader reader = server.getResourceManager().openAsReader(ROUND_CONFIG)) {
-            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-            for (var element : json.getAsJsonArray("rounds")) {
-                ResourceLocation recipeId = ResourceLocation.tryParse(element.getAsString());
-                if (recipeId == null) throw new IOException("无效菜谱 ID: " + element);
-                RecipeFacts facts = recipeFacts(server, recipeId);
-                if (!facts.supported()) throw new IOException("菜谱不是受支持的森罗炒锅或汤锅配方: " + recipeId);
-                if (facts.result().isEmpty()) throw new IOException("菜谱没有可提交成品: " + recipeId);
-                if (facts.ingredients().isEmpty()) throw new IOException("菜谱没有可验证食材: " + recipeId);
-                if (!ServingTable.isPlaceableDish(facts.result())) {
-                    throw new IOException("菜谱成品不是可单格立体摆盘的森罗食物: " + recipeId);
-                }
-                result.add(recipeId);
-            }
-        }
-        if (result.isEmpty()) throw new IOException("比赛轮次配置为空");
-        return List.copyOf(result);
     }
 
     public static RecipeFacts recipeFacts(MinecraftServer server, ResourceLocation recipeId) throws IOException {
@@ -88,43 +54,6 @@ public final class CookeryIntegration {
 
     public static ItemStack expectedDish(MinecraftServer server, ResourceLocation recipeId) {
         return recipeFactsUnchecked(server, recipeId).result().copy();
-    }
-
-    public static BlockPos playerStation(CompetitionRecord record, RecipeFacts facts) {
-        return facts.station() == StationType.STOCKPOT ? record.playerStockpotPos() : record.playerPotPos();
-    }
-
-    public static BlockPos blazeStation(CompetitionRecord record, RecipeFacts facts) {
-        return facts.station() == StationType.STOCKPOT ? record.blazeStockpotPos() : record.blazePotPos();
-    }
-
-    /** 给双厨房的每口炒锅和汤锅写入持久比赛归属。 */
-    public static void markCompetitionStations(ServerLevel level, CompetitionRecord record) {
-        markStation(level, record.playerPotPos(), record, true);
-        markStation(level, record.playerSecondPotPos(), record, true);
-        markStation(level, record.playerStockpotPos(), record, true);
-        markStation(level, record.blazePotPos(), record, false);
-        markStation(level, record.blazeSecondPotPos(), record, false);
-        markStation(level, record.blazeStockpotPos(), record, false);
-    }
-
-    private static void markStation(ServerLevel level, BlockPos pos, CompetitionRecord record, boolean playerStation) {
-        BlockEntity blockEntity = level.getBlockEntity(pos);
-        if (!(blockEntity instanceof PotBlockEntity) && !(blockEntity instanceof StockpotBlockEntity)) return;
-        CompoundTag tag = blockEntity.getPersistentData();
-        tag.putUUID(COMPETITION_TAG, record.competitionId);
-        tag.putUUID(OWNER_TAG, record.playerId);
-        tag.putBoolean(PLAYER_STATION_TAG, playerStation);
-        blockEntity.setChanged();
-    }
-
-    public static boolean isTaggedPlayerStation(ServerLevel level, BlockPos pos, CompetitionRecord record) {
-        BlockEntity blockEntity = level.getBlockEntity(pos);
-        if (!(blockEntity instanceof PotBlockEntity) && !(blockEntity instanceof StockpotBlockEntity)) return false;
-        CompoundTag tag = blockEntity.getPersistentData();
-        return tag.getBoolean(PLAYER_STATION_TAG)
-                && tag.hasUUID(COMPETITION_TAG) && record.competitionId.equals(tag.getUUID(COMPETITION_TAG))
-                && tag.hasUUID(OWNER_TAG) && record.playerId.equals(tag.getUUID(OWNER_TAG));
     }
 
     public static StationSnapshot inspectStation(ServerLevel level, BlockPos pos, RecipeFacts expected) {
@@ -170,20 +99,6 @@ public final class CookeryIntegration {
             if (!stack.isEmpty()) return stack.copyWithCount(1);
         }
         return ItemStack.EMPTY;
-    }
-
-    public static boolean requiredRegistriesPresent() {
-        return ModList.get().isLoaded("cataclysm")
-                && ModList.get().isLoaded("create")
-                && ModList.get().isLoaded("kaleidoscope_cookery")
-                && BuiltInRegistries.ENTITY_TYPE.containsKey(IGNIS)
-                && BuiltInRegistries.BLOCK.containsKey(POT)
-                && BuiltInRegistries.BLOCK.containsKey(STOCKPOT)
-                && BuiltInRegistries.BLOCK.containsKey(STOVE)
-                && BuiltInRegistries.BLOCK.containsKey(CHOPPING_BOARD)
-                && BuiltInRegistries.ITEM.containsKey(OIL)
-                && BuiltInRegistries.ITEM.containsKey(KITCHEN_SHOVEL)
-                && BuiltInRegistries.ITEM.containsKey(STOCKPOT_LID);
     }
 
     public static ItemStack item(ResourceLocation id) {

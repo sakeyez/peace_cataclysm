@@ -1,5 +1,7 @@
 package cn.sake_yez.culinarycataclysm.npc;
 
+import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisCookeryStations;
+
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CookedDishEvidence;
@@ -175,7 +177,7 @@ public final class BlazeChefController {
 
     private static void tickMovingToStation(ServerLevel level, CompetitionSavedData data, CompetitionRecord record, Mob chef,
                                             CookeryIntegration.RecipeFacts facts) {
-        BlockPos station = CookeryIntegration.blazeStation(record, facts);
+        BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         BlockPos workPos = record.blazeCookingStandPos(station);
         if (followRoute(level, data, record, chef, routeToStation(record, station, workPos), "前往锅具")) {
             transition(record, data, WorkState.COOKING);
@@ -184,7 +186,7 @@ public final class BlazeChefController {
 
     private static void tickCooking(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
                                     Mob chef, CookeryIntegration.RecipeFacts facts) {
-        BlockPos station = CookeryIntegration.blazeStation(record, facts);
+        BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         stopMoving(chef);
         lookAt(chef, station);
         if (facts.station() == CookeryIntegration.StationType.POT) {
@@ -302,7 +304,7 @@ public final class BlazeChefController {
 
     private static void tickCollecting(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
                                        Mob chef, CookeryIntegration.RecipeFacts facts) {
-        BlockPos station = CookeryIntegration.blazeStation(record, facts);
+        BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         stopMoving(chef);
         ItemStack result;
         ItemStack bowl = takeLedgerItem(record, BuiltInRegistries.ITEM.getKey(Items.BOWL));
@@ -357,7 +359,7 @@ public final class BlazeChefController {
 
     private static void tickSubmitting(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
                                        Mob chef, CookeryIntegration.RecipeFacts facts) {
-        BlockPos station = CookeryIntegration.blazeStation(record, facts);
+        BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         if (followRoute(level, data, record, chef, routeToSubmit(record, station), "前往提交区")) {
             if (record.platedSubmission && record.blazePlatedDishId == null) {
                 ItemStack dish = chef.getMainHandItem();

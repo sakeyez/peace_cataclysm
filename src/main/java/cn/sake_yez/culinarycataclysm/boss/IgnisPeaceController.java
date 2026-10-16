@@ -1,8 +1,8 @@
 package cn.sake_yez.culinarycataclysm.boss;
 
-import cn.sake_yez.culinarycataclysm.integration.CookeryIntegration;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 
@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.lang.reflect.Method;
 
 public final class IgnisPeaceController {
+    public static final ResourceLocation IGNIS = ResourceLocation.fromNamespaceAndPath("cataclysm", "ignis");
     private static final String MANAGED_KEY = "CulinaryCataclysmManaged";
     private static final String COMPETITION_KEY = "CulinaryCataclysmCompetition";
 
@@ -18,7 +19,7 @@ public final class IgnisPeaceController {
     }
 
     public static boolean isIgnis(Entity entity) {
-        return CookeryIntegration.IGNIS.equals(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
+        return IGNIS.equals(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
     }
 
     public static boolean isManaged(Entity entity) {
