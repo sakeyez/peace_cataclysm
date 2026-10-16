@@ -1,0 +1,10 @@
+/build/
+.gradle/
+run/
+logs/
+*.class
+/libs/
+/.tools/
+__pycache__/
+*.pyc
+/.vscode/

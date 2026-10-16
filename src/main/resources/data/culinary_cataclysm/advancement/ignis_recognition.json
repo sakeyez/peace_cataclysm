@@ -1,0 +1,16 @@
+{
+  "display": {
+    "icon": { "id": "minecraft:blaze_powder" },
+    "title": { "translate": "advancements.culinary_cataclysm.ignis_recognition.title" },
+    "description": { "translate": "advancements.culinary_cataclysm.ignis_recognition.description" },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "won_competition": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
