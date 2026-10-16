@@ -14,10 +14,20 @@ dependencies {
 
 neoForge {
     version = project.neo_version
+    addModdingDependenciesTo(sourceSets.test)
     runs { client { client() }; server { server(); programArgument '--nogui' } }
     mods { "${mod_id}" { sourceSet(sourceSets.main) } }
 }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+tasks.register('verifyChallengeMigration', JavaExec) {
+    group = 'verification'
+    description = 'Run the dependency-free Challenge Store and Ignis migration checks.'
+    dependsOn tasks.testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'cn.sake_yez.culinarycataclysm.challenge.ChallengeMigrationCheck'
+    if (project.hasProperty('m2LegacyData')) args project.property('m2LegacyData').toString().split(';')
+}
+tasks.named('check') { dependsOn tasks.named('verifyChallengeMigration') }
 processResources {
     def props = [minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
                  neo_version: neo_version, loader_version_range: loader_version_range,
