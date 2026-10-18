@@ -23,24 +23,10 @@ public final class CompetitionRecord {
     public UUID blazeChefId;
     public final ResourceLocation dimension;
     public final BlockPos arenaCenter;
-    public final BlockPos playerKitchenOrigin;
-    public final BlockPos blazeKitchenOrigin;
-    /** 新场地的西北角；旧比赛没有该字段，继续使用双厨房模板。 */
-    public BlockPos battlefieldOrigin;
+    /** 当前对称比赛场地的西北角。 */
+    public final BlockPos battlefieldOrigin;
     /** 与新场地重叠的原生祭坛基座方块；建造和清理都不能改动。 */
     public final Set<Long> preservedBattlefieldBlocks = new HashSet<>();
-    /** 降低一格时被模板地板覆盖的原始方块状态，赛后逐格还原。 */
-    public final Map<Long, CompoundTag> originalBattlefieldFloor = new LinkedHashMap<>();
-    /** 新比赛采用双侧并行落块；旧比赛沿用原方块序列以保护 buildCursor。 */
-    public boolean twoSidedBuild;
-    /** 上一版比赛的逐层镜像螺旋顺序，供已开工存档继续使用。 */
-    public boolean spiralBuild;
-    /** 新比赛逐层按行镜像施工；与螺旋顺序分开存储以保护旧 buildCursor。 */
-    public boolean mirroredBuild;
-    /** 新场地直接使用大厅原地板，模板的 y=0 层不施工。 */
-    public boolean aboveGroundOnly;
-    /** 新比赛在真实食物方块上摆盘；旧存档继续使用原提交方式。 */
-    public boolean platedSubmission;
     public boolean servingTableBuilt;
     public UUID playerPlatedDishId;
     public UUID blazePlatedDishId;
@@ -51,14 +37,14 @@ public final class CompetitionRecord {
     public int stateTicks;
     public int currentRound;
     public int buildCursor;
-    /** 清理的目标数量；-1 兼容旧存档的完整场地清理。 */
-    public int cleanupTargetCount = -1;
+    /** 取消或结算时冻结的已施工目标数量。 */
+    public int cleanupTargetCount;
     public int playerTotal;
     public int blazeTotal;
     public boolean rewardIssued;
     public boolean finalResultResolved;
     public boolean kitchensBuilt;
-    /** 旧存档字段，仅保留统计兼容；不再作为生产或评分证明。 */
+    /** 诊断统计与当前轮次评分证据。 */
     public int stationInteractions;
     public int playerVerifiedOperations;
     public int playerCookingStartedTick;
@@ -87,15 +73,13 @@ public final class CompetitionRecord {
     public final Map<ResourceLocation, Integer> blazeInventory = new LinkedHashMap<>();
 
     public CompetitionRecord(UUID competitionId, UUID playerId, UUID ignisId, ResourceLocation dimension,
-                             BlockPos arenaCenter, BlockPos playerKitchenOrigin, BlockPos blazeKitchenOrigin,
-                             List<ResourceLocation> recipes) {
+                             BlockPos arenaCenter, BlockPos battlefieldOrigin, List<ResourceLocation> recipes) {
         this.competitionId = competitionId;
         this.playerId = playerId;
         this.ignisId = ignisId;
         this.dimension = dimension;
         this.arenaCenter = arenaCenter.immutable();
-        this.playerKitchenOrigin = playerKitchenOrigin.immutable();
-        this.blazeKitchenOrigin = blazeKitchenOrigin.immutable();
+        this.battlefieldOrigin = battlefieldOrigin.immutable();
         this.recipes = List.copyOf(recipes);
     }
 
@@ -109,92 +93,67 @@ public final class CompetitionRecord {
     }
 
     public boolean containsArena(BlockPos pos) {
-        if (battlefieldOrigin != null) {
-            return inside(battlefieldOrigin, pos, 0, 20, 0, 6, 0, 20)
-                    || inside(arenaCenter, pos, -2, 2, -3, 5, -2, 2);
-        }
-        int minX = Math.min(playerKitchenOrigin.getX(), blazeKitchenOrigin.getX()) - 2;
-        int maxX = Math.max(playerKitchenOrigin.getX(), blazeKitchenOrigin.getX()) + 10;
-        int minZ = Math.min(playerKitchenOrigin.getZ(), blazeKitchenOrigin.getZ()) - 2;
-        int maxZ = Math.max(playerKitchenOrigin.getZ(), blazeKitchenOrigin.getZ()) + 10;
-        return pos.getX() >= minX && pos.getX() <= maxX
-                && pos.getZ() >= minZ && pos.getZ() <= maxZ
-                && pos.getY() >= arenaCenter.getY() - 2 && pos.getY() <= arenaCenter.getY() + 8;
+        return inside(battlefieldOrigin, pos, 0, 20, 0, 6, 0, 20)
+                || inside(arenaCenter, pos, -2, 2, -3, 5, -2, 2);
     }
 
     public boolean isPlayerKitchen(BlockPos pos) {
-        if (battlefieldOrigin != null) return inside(battlefieldOrigin, pos, 0, 9, 0, 6, 0, 20);
-        return containsKitchen(playerKitchenOrigin, pos);
+        return inside(battlefieldOrigin, pos, 0, 9, 0, 6, 0, 20);
     }
 
     public boolean isBlazeKitchen(BlockPos pos) {
-        if (battlefieldOrigin != null) return inside(battlefieldOrigin, pos, 11, 20, 0, 6, 0, 20);
-        return containsKitchen(blazeKitchenOrigin, pos);
-    }
-
-    private static boolean containsKitchen(BlockPos origin, BlockPos pos) {
-        return pos.getX() >= origin.getX() && pos.getX() <= origin.getX() + 8
-                && pos.getZ() >= origin.getZ() && pos.getZ() <= origin.getZ() + 8
-                && pos.getY() >= origin.getY() && pos.getY() <= origin.getY() + 7;
+        return inside(battlefieldOrigin, pos, 11, 20, 0, 6, 0, 20);
     }
 
     public boolean isKitchenStation(BlockPos pos) {
-        if (battlefieldOrigin != null) return isPlayerStation(pos) || pos.equals(blazePotPos())
+        return isPlayerStation(pos) || pos.equals(blazePotPos())
                 || pos.equals(blazeStockpotPos()) || pos.equals(battlefieldOrigin.offset(13, 4, 9));
-        return isStationAt(playerKitchenOrigin, pos) || isStationAt(blazeKitchenOrigin, pos);
     }
 
     public boolean isPlayerStation(BlockPos pos) {
-        if (battlefieldOrigin != null) return pos.equals(playerPotPos()) || pos.equals(playerStockpotPos())
+        return pos.equals(playerPotPos()) || pos.equals(playerStockpotPos())
                 || pos.equals(playerSecondPotPos())
                 || pos.equals(battlefieldOrigin.offset(7, 4, 9));
-        return isStationAt(playerKitchenOrigin, pos);
     }
 
     public BlockPos playerPotPos() {
-        if (battlefieldOrigin != null) return battlefieldOrigin.offset(7, 4, 6);
-        return playerKitchenOrigin.offset(2, 2, 6);
+        return battlefieldOrigin.offset(7, 4, 6);
     }
 
     public BlockPos playerStockpotPos() {
-        if (battlefieldOrigin != null) return battlefieldOrigin.offset(7, 4, 5);
-        return playerKitchenOrigin.offset(6, 2, 6);
+        return battlefieldOrigin.offset(7, 4, 5);
     }
 
     public BlockPos playerSecondPotPos() {
-        return battlefieldOrigin != null ? battlefieldOrigin.offset(7, 4, 7) : playerPotPos();
+        return battlefieldOrigin.offset(7, 4, 7);
     }
 
     public BlockPos blazePotPos() {
-        if (battlefieldOrigin != null) return battlefieldOrigin.offset(13, 4, 6);
-        return blazeKitchenOrigin.offset(2, 2, 6);
+        return battlefieldOrigin.offset(13, 4, 6);
     }
 
     public BlockPos blazeStockpotPos() {
-        if (battlefieldOrigin != null) return battlefieldOrigin.offset(13, 4, 5);
-        return blazeKitchenOrigin.offset(6, 2, 6);
+        return battlefieldOrigin.offset(13, 4, 5);
     }
 
     public BlockPos blazeSecondPotPos() {
-        return battlefieldOrigin != null ? battlefieldOrigin.offset(13, 4, 7) : blazePotPos();
+        return battlefieldOrigin.offset(13, 4, 7);
     }
 
     public BlockPos blazeChefStandPos() {
-        return battlefieldOrigin != null ? battlefieldOrigin.offset(14, 4, 9) : blazeKitchenOrigin.offset(4, 2, 3);
+        return battlefieldOrigin.offset(14, 4, 9);
     }
 
     public BlockPos blazePantryPos() {
-        return battlefieldOrigin != null ? battlefieldOrigin.offset(16, 3, 12) : blazeKitchenOrigin.offset(7, 2, 2);
+        return battlefieldOrigin.offset(16, 3, 12);
     }
 
     public BlockPos blazeCookingStandPos(BlockPos station) {
-        return battlefieldOrigin != null ? station.offset(2, 0, 0) : station.offset(0, 0, -2);
+        return station.offset(2, 0, 0);
     }
 
     public BlockPos blazeSubmitPos() {
-        return battlefieldOrigin != null
-                ? battlefieldOrigin.offset(platedSubmission ? 16 : 14, 4, platedSubmission ? 17 : 12)
-                : arenaCenter.offset(4, 0, 2);
+        return battlefieldOrigin.offset(16, 4, 17);
     }
 
     public BlockPos playerServingBase() {
@@ -213,12 +172,6 @@ public final class CompetitionRecord {
         return x >= minX && x <= maxX && y >= minY && y <= maxY && z >= minZ && z <= maxZ;
     }
 
-    private static boolean isStationAt(BlockPos origin, BlockPos pos) {
-        return pos.equals(origin.offset(2, 2, 6))
-                || pos.equals(origin.offset(6, 2, 6))
-                || pos.equals(origin.offset(4, 2, 6));
-    }
-
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         tag.putUUID("CompetitionId", competitionId);
@@ -227,23 +180,8 @@ public final class CompetitionRecord {
         if (blazeChefId != null) tag.putUUID("BlazeChefId", blazeChefId);
         tag.putString("Dimension", dimension.toString());
         putPos(tag, "Arena", arenaCenter);
-        putPos(tag, "PlayerKitchen", playerKitchenOrigin);
-        putPos(tag, "BlazeKitchen", blazeKitchenOrigin);
-        if (battlefieldOrigin != null) putPos(tag, "Battlefield", battlefieldOrigin);
+        putPos(tag, "Battlefield", battlefieldOrigin);
         tag.putLongArray("PreservedBattlefieldBlocks", preservedBattlefieldBlocks.stream().mapToLong(Long::longValue).toArray());
-        ListTag floorTags = new ListTag();
-        originalBattlefieldFloor.forEach((pos, state) -> {
-            CompoundTag entry = new CompoundTag();
-            entry.putLong("Pos", pos);
-            entry.put("State", state.copy());
-            floorTags.add(entry);
-        });
-        tag.put("OriginalBattlefieldFloor", floorTags);
-        tag.putBoolean("TwoSidedBuild", twoSidedBuild);
-        tag.putBoolean("SpiralBuild", spiralBuild);
-        tag.putBoolean("MirroredBuild", mirroredBuild);
-        tag.putBoolean("AboveGroundOnly", aboveGroundOnly);
-        tag.putBoolean("PlatedSubmission", platedSubmission);
         tag.putBoolean("ServingTableBuilt", servingTableBuilt);
         if (playerPlatedDishId != null) tag.putUUID("PlayerPlatedDishId", playerPlatedDishId);
         if (blazePlatedDishId != null) tag.putUUID("BlazePlatedDishId", blazePlatedDishId);
@@ -315,27 +253,14 @@ public final class CompetitionRecord {
         ListTag recipeTags = tag.getList("Recipes", Tag.TAG_COMPOUND);
         for (int i = 0; i < recipeTags.size(); i++) {
             ResourceLocation id = ResourceLocation.tryParse(recipeTags.getCompound(i).getString("Id"));
-            if (id != null) recipes.add(migrateRecipeId(id));
+            if (id != null) recipes.add(id);
         }
         ResourceLocation dimension = ResourceLocation.tryParse(tag.getString("Dimension"));
         CompetitionRecord record = new CompetitionRecord(
                 tag.getUUID("CompetitionId"), tag.getUUID("PlayerId"), tag.getUUID("IgnisId"),
                 dimension == null ? ResourceLocation.withDefaultNamespace("overworld") : dimension,
-                getPos(tag, "Arena"), getPos(tag, "PlayerKitchen"), getPos(tag, "BlazeKitchen"), recipes);
-        if (tag.contains("Battlefield", Tag.TAG_COMPOUND)) record.battlefieldOrigin = getPos(tag, "Battlefield");
+                getPos(tag, "Arena"), getPos(tag, "Battlefield"), recipes);
         for (long pos : tag.getLongArray("PreservedBattlefieldBlocks")) record.preservedBattlefieldBlocks.add(pos);
-        ListTag floorTags = tag.getList("OriginalBattlefieldFloor", Tag.TAG_COMPOUND);
-        for (int i = 0; i < floorTags.size(); i++) {
-            CompoundTag entry = floorTags.getCompound(i);
-            if (entry.contains("State", Tag.TAG_COMPOUND)) {
-                record.originalBattlefieldFloor.put(entry.getLong("Pos"), entry.getCompound("State").copy());
-            }
-        }
-        record.twoSidedBuild = tag.getBoolean("TwoSidedBuild");
-        record.spiralBuild = tag.getBoolean("SpiralBuild");
-        record.mirroredBuild = tag.getBoolean("MirroredBuild");
-        record.aboveGroundOnly = tag.getBoolean("AboveGroundOnly");
-        record.platedSubmission = tag.getBoolean("PlatedSubmission");
         record.servingTableBuilt = tag.getBoolean("ServingTableBuilt");
         if (tag.hasUUID("PlayerPlatedDishId")) record.playerPlatedDishId = tag.getUUID("PlayerPlatedDishId");
         if (tag.hasUUID("BlazePlatedDishId")) record.blazePlatedDishId = tag.getUUID("BlazePlatedDishId");
@@ -354,9 +279,7 @@ public final class CompetitionRecord {
         record.stateTicks = tag.getInt("StateTicks");
         record.currentRound = tag.getInt("CurrentRound");
         record.buildCursor = tag.getInt("BuildCursor");
-        if (tag.contains("CleanupTargetCount", Tag.TAG_INT)) {
-            record.cleanupTargetCount = tag.getInt("CleanupTargetCount");
-        }
+        record.cleanupTargetCount = tag.getInt("CleanupTargetCount");
         record.playerTotal = tag.getInt("PlayerTotal");
         record.blazeTotal = tag.getInt("BlazeTotal");
         record.rewardIssued = tag.getBoolean("RewardIssued");
@@ -403,20 +326,6 @@ public final class CompetitionRecord {
             if (id != null && entry.getInt("Count") > 0) record.blazeInventory.put(id, entry.getInt("Count"));
         }
         return record;
-    }
-
-    private static ResourceLocation migrateRecipeId(ResourceLocation id) {
-        String path = id.getPath();
-        if (path.equals("stockpot/tomato_beef_brisket_soup")) {
-            return ResourceLocation.fromNamespaceAndPath("kaleidoscope_cookery", "flex_stockpot/borscht");
-        }
-        if (path.startsWith("pot/")) {
-            return ResourceLocation.fromNamespaceAndPath(id.getNamespace(), "flex_pot/" + path.substring("pot/".length()));
-        }
-        if (path.startsWith("stockpot/")) {
-            return ResourceLocation.fromNamespaceAndPath(id.getNamespace(), "flex_stockpot/" + path.substring("stockpot/".length()));
-        }
-        return id;
     }
 
     static void putPos(CompoundTag tag, String key, BlockPos pos) {

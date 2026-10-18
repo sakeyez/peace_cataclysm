@@ -3,7 +3,7 @@ package cn.sake_yez.culinarycataclysm.npc;
 import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisCookeryStations;
 
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
+import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisChallengeRegistry;
 import cn.sake_yez.culinarycataclysm.competition.CookedDishEvidence;
 import cn.sake_yez.culinarycataclysm.competition.DishProvenance;
 import cn.sake_yez.culinarycataclysm.competition.ServingTable;
@@ -48,7 +48,7 @@ public final class BlazeChefController {
     public static void spawn(ServerLevel level, CompetitionRecord record) {
         if (record.blazeChefId != null && level.getEntity(record.blazeChefId) != null) return;
         for (Mob existing : level.getEntitiesOfClass(Mob.class,
-                new AABB(record.blazeKitchenOrigin).inflate(16.0),
+                new AABB(record.battlefieldOrigin.offset(12, 2, 1)).inflate(16.0),
                 mob -> mob.getPersistentData().hasUUID("Competition")
                         && mob.getPersistentData().getUUID("Competition").equals(record.competitionId))) {
             record.blazeChefId = existing.getUUID();
@@ -85,10 +85,10 @@ public final class BlazeChefController {
         record.blazeFailureReason = "";
     }
 
-    public static void tick(ServerLevel level, CompetitionSavedData data, CompetitionRecord record) {
+    public static void tick(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record) {
         if (record.blazeChefId == null || level.getEntity(record.blazeChefId) == null) {
             spawn(level, record);
-            data.setDirty();
+            data.changed(record);
         }
         if (record.blazeChefId == null) return;
         Entity entity = level.getEntity(record.blazeChefId);
@@ -96,16 +96,6 @@ public final class BlazeChefController {
         chef.setNoAi(true);
         chef.setNoGravity(true);
         chef.setInvulnerable(true);
-        // 旧存档里已出餐却被等待超时误判为失败的比赛，可以继续提交已签发的菜。
-        if (record.blazeWorkState == WorkState.FAILED && record.currentBlazeDishId != null
-                && record.evidence(record.currentBlazeDishId).filter(evidence ->
-                    evidence.producer == CookedDishEvidence.Producer.BLAZE_CHEF
-                        && evidence.round == record.currentRound && !evidence.submitted).isPresent()) {
-            transition(record, data, record.platedSubmission && record.blazePlatedDishId == null
-                    ? WorkState.SUBMITTING : WorkState.FINISHED);
-            LOGGER.info("恢复已完成出餐的烈焰人厨师：competition={}, round={}",
-                    record.competitionId, record.currentRound + 1);
-        }
         if (record.blazeWorkState == WorkState.WAITING || record.blazeWorkState == WorkState.FINISHED
                 || record.blazeWorkState == WorkState.FAILED) {
             stopMoving(chef);
@@ -133,7 +123,7 @@ public final class BlazeChefController {
         }
     }
 
-    private static void tickFetching(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickFetching(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                      Mob chef, CookeryIntegration.RecipeFacts facts) {
         if (!followRoute(level, data, record, chef,
                 List.of(flightPoint(record, record.blazePantryPos())), "取料")) return;
@@ -160,7 +150,7 @@ public final class BlazeChefController {
         transition(record, data, WorkState.PREPARING);
     }
 
-    private static void tickPreparing(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickPreparing(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                       Mob chef, CookeryIntegration.RecipeFacts facts) {
         stopMoving(chef);
         if (record.blazeWorkTicks < 20) return;
@@ -175,7 +165,7 @@ public final class BlazeChefController {
         transition(record, data, WorkState.MOVING_TO_STATION);
     }
 
-    private static void tickMovingToStation(ServerLevel level, CompetitionSavedData data, CompetitionRecord record, Mob chef,
+    private static void tickMovingToStation(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record, Mob chef,
                                             CookeryIntegration.RecipeFacts facts) {
         BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         BlockPos workPos = record.blazeCookingStandPos(station);
@@ -184,7 +174,7 @@ public final class BlazeChefController {
         }
     }
 
-    private static void tickCooking(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickCooking(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                     Mob chef, CookeryIntegration.RecipeFacts facts) {
         BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         stopMoving(chef);
@@ -197,7 +187,7 @@ public final class BlazeChefController {
         if (record.blazeWorkState == WorkState.COOKING) watchCookingProgress(level, data, record, station);
     }
 
-    private static void tickPot(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickPot(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                 Mob chef, CookeryIntegration.RecipeFacts facts, BlockPos station) {
         if (!(level.getBlockEntity(station) instanceof PotBlockEntity pot) || !pot.hasHeatSource(level)) {
             fail(record, data, "炒锅缺失或无热源");
@@ -210,7 +200,7 @@ public final class BlazeChefController {
                 return;
             }
             record.blazeIngredientCursor++;
-            data.setDirty();
+            data.changed(record);
             return;
         }
         int ingredientIndex = record.blazeIngredientCursor - 1;
@@ -224,7 +214,7 @@ public final class BlazeChefController {
             record.blazeIngredientCursor++;
             chef.setItemInHand(InteractionHand.MAIN_HAND, CookeryIntegration.ingredientStack(facts.ingredients().get(ingredientIndex)));
             chef.swing(InteractionHand.MAIN_HAND, true);
-            data.setDirty();
+            data.changed(record);
             return;
         }
         ItemStack shovel = CookeryIntegration.item(CookeryIntegration.KITCHEN_SHOVEL);
@@ -232,7 +222,7 @@ public final class BlazeChefController {
         if (pot.getStatus() == PotBlockEntity.PUT_INGREDIENT) {
             pot.onShovelHit(level, chef, shovel);
             chef.swing(InteractionHand.MAIN_HAND, true);
-            data.setDirty();
+            data.changed(record);
             return;
         }
         if (pot.getStatus() == PotBlockEntity.COOKING && record.blazeWorkTicks % 20 == 0) {
@@ -243,7 +233,7 @@ public final class BlazeChefController {
         if (pot.getStatus() == PotBlockEntity.BURNT) fail(record, data, "炒锅成品烧焦");
     }
 
-    private static void tickStockpot(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickStockpot(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                      Mob chef, CookeryIntegration.RecipeFacts facts, BlockPos station) {
         if (!(level.getBlockEntity(station) instanceof StockpotBlockEntity pot) || !pot.hasHeatSource(level)) {
             fail(record, data, "汤锅缺失或无热源");
@@ -257,7 +247,7 @@ public final class BlazeChefController {
                 return;
             }
             record.blazeIngredientCursor++;
-            data.setDirty();
+            data.changed(record);
             return;
         }
         int ingredientIndex = record.blazeIngredientCursor - 1;
@@ -271,7 +261,7 @@ public final class BlazeChefController {
             chef.setItemInHand(InteractionHand.MAIN_HAND, CookeryIntegration.ingredientStack(facts.ingredients().get(ingredientIndex)));
             chef.swing(InteractionHand.MAIN_HAND, true);
             record.blazeIngredientCursor++;
-            data.setDirty();
+            data.changed(record);
             return;
         }
         if (!pot.hasLid()) {
@@ -281,7 +271,7 @@ public final class BlazeChefController {
                 fail(record, data, "汤锅无法盖盖");
                 return;
             }
-            data.setDirty();
+            data.changed(record);
             return;
         }
         if (pot.getStatus() == StockpotBlockEntity.FINISHED) transition(record, data, WorkState.COLLECTING);
@@ -302,7 +292,7 @@ public final class BlazeChefController {
         return BuiltInRegistries.ITEM.get(id).getDefaultInstance();
     }
 
-    private static void tickCollecting(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickCollecting(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                        Mob chef, CookeryIntegration.RecipeFacts facts) {
         BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         stopMoving(chef);
@@ -357,11 +347,11 @@ public final class BlazeChefController {
         transition(record, data, WorkState.SUBMITTING);
     }
 
-    private static void tickSubmitting(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void tickSubmitting(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                        Mob chef, CookeryIntegration.RecipeFacts facts) {
         BlockPos station = IgnisCookeryStations.blazeStation(record, facts);
         if (followRoute(level, data, record, chef, routeToSubmit(record, station), "前往提交区")) {
-            if (record.platedSubmission && record.blazePlatedDishId == null) {
+            if (record.blazePlatedDishId == null) {
                 ItemStack dish = chef.getMainHandItem();
                 if (DishProvenance.read(dish).filter(marker -> marker.dishId().equals(record.currentBlazeDishId)
                         && marker.competitionId().equals(record.competitionId)
@@ -381,33 +371,25 @@ public final class BlazeChefController {
 
     private static List<Vec3> routeToStation(CompetitionRecord record, BlockPos station, BlockPos workPos) {
         Vec3 work = flightPoint(record, workPos);
-        if (record.battlefieldOrigin == null) return List.of(work);
         return List.of(aislePoint(record, station.getZ()), work);
     }
 
     private static List<Vec3> routeToSubmit(CompetitionRecord record, BlockPos station) {
         Vec3 submit = flightPoint(record, record.blazeSubmitPos());
-        if (record.battlefieldOrigin == null) {
-            // 旧双厨房的 x=0 是侧墙；从厨房北端绕出，不能直穿侧墙去旧提交点。
-            double aisleX = record.blazeKitchenOrigin.getX() + 1.5;
-            double flightY = record.blazeChefStandPos().getY();
-            return List.of(new Vec3(aisleX, flightY, station.getZ() - 1.5),
-                    new Vec3(aisleX, flightY, record.blazeKitchenOrigin.getZ() - 1.5), submit);
-        }
         return List.of(aislePoint(record, station.getZ()),
                 aislePoint(record, record.blazeSubmitPos().getZ()), submit);
     }
 
-    /** 新场地的 x=16 是锅具外侧的空通道。 */
+    /** 场地的 x=16 是锅具外侧的空通道。 */
     private static Vec3 aislePoint(CompetitionRecord record, int z) {
         return new Vec3(record.battlefieldOrigin.getX() + 16.5,
                 record.blazeChefStandPos().getY(), z + 0.5);
     }
 
-    private static boolean followRoute(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static boolean followRoute(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                        Mob chef, List<Vec3> route, String stage) {
         double flightY = record.blazeChefStandPos().getY();
-        // 从旧存档的低处储物点恢复时先垂直回到飞行高度，不斜穿柜台。
+        // 厨师位置偏离飞行高度时先垂直归位，避免斜穿柜台。
         if (Math.abs(chef.getY() - flightY) > 0.15) {
             moveStep(level, data, record, chef, new Vec3(chef.getX(), flightY, chef.getZ()), stage);
             return false;
@@ -416,7 +398,7 @@ public final class BlazeChefController {
                 && chef.position().distanceToSqr(route.get(record.blazeRouteIndex)) <= ARRIVAL_DISTANCE_SQR) {
             record.blazeRouteIndex++;
             record.blazeMoveStallTicks = 0;
-            data.setDirty();
+            data.changed(record);
         }
         if (record.blazeRouteIndex >= route.size()) {
             stopMoving(chef);
@@ -426,7 +408,7 @@ public final class BlazeChefController {
         return false;
     }
 
-    private static void moveStep(ServerLevel level, CompetitionSavedData data, CompetitionRecord record,
+    private static void moveStep(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record,
                                  Mob chef, Vec3 target, String stage) {
         Vec3 difference = target.subtract(chef.position());
         Vec3 direction = Math.abs(difference.y) > 0.15
@@ -449,7 +431,7 @@ public final class BlazeChefController {
         }
     }
 
-    private static void watchCookingProgress(ServerLevel level, CompetitionSavedData data,
+    private static void watchCookingProgress(ServerLevel level, IgnisChallengeRegistry data,
                                              CompetitionRecord record, BlockPos station) {
         String progress;
         if (level.getBlockEntity(station) instanceof PotBlockEntity pot) {
@@ -475,7 +457,7 @@ public final class BlazeChefController {
         }
     }
 
-    private static void transition(CompetitionRecord record, CompetitionSavedData data, WorkState state) {
+    private static void transition(CompetitionRecord record, IgnisChallengeRegistry data, WorkState state) {
         record.blazeWorkState = state;
         record.blazeWorkTicks = 0;
         record.blazeRouteIndex = 0;
@@ -483,14 +465,14 @@ public final class BlazeChefController {
         record.blazeCookingProgress = "";
         record.blazeCookingStallTicks = 0;
         record.blazeFailureReason = "";
-        data.setDirty();
+        data.changed(record);
     }
 
-    private static void fail(CompetitionRecord record, CompetitionSavedData data, String reason) {
+    private static void fail(CompetitionRecord record, IgnisChallengeRegistry data, String reason) {
         record.blazeWorkState = WorkState.FAILED;
         record.blazeWorkTicks = 0;
         record.blazeFailureReason = reason;
-        data.setDirty();
+        data.changed(record);
         LOGGER.error("烈焰人厨师失败：competition={}, round={}, reason={}",
                 record.competitionId, record.currentRound + 1, reason);
     }

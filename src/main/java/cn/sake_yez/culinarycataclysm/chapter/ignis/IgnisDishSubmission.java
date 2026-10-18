@@ -1,7 +1,6 @@
 package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
 import cn.sake_yez.culinarycataclysm.competition.CookedDishEvidence;
 import cn.sake_yez.culinarycataclysm.competition.DishProvenance;
@@ -20,8 +19,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.common.util.TriState;
@@ -47,7 +44,6 @@ public final class IgnisDishSubmission {
     /** 返回 true 表示餐桌交互已由摆盘流程处理。 */
     public boolean onRightClickBlock(PlayerInteractEvent.RightClickBlock event, ServerPlayer player,
                                      CompetitionRecord record) {
-        if (!record.platedSubmission) return false;
         if (event.getPos().equals(record.playerServingBase().above())
                 || event.getPos().equals(record.blazeServingBase().above())) {
             event.setCanceled(true);
@@ -93,9 +89,9 @@ public final class IgnisDishSubmission {
 
     public void onPlace(BlockEvent.EntityPlaceEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
-        CompetitionSavedData data = CompetitionSavedData.get(level);
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(level);
         data.at(level.dimension().location(), event.getPos()).ifPresent(record -> {
-            if (record.platedSubmission && event.getPos().equals(record.playerServingBase().above())
+            if (event.getPos().equals(record.playerServingBase().above())
                     && event.getEntity() instanceof ServerPlayer player) {
                 PendingPlate pending = pendingPlates.remove(player.getUUID());
                 if (pending != null && pending.competitionId().equals(record.competitionId)
@@ -106,7 +102,7 @@ public final class IgnisDishSubmission {
                         && record.playerPlatedDishId == null
                         && ServingTable.matchesDish(level, event.getPos(), pending.stack())) {
                     record.playerPlatedDishId = pending.dishId();
-                    data.setDirty();
+                    data.changed(record);
                     player.displayClientMessage(Component.translatable("message.culinary_cataclysm.dish_plated"), true);
                     return;
                 }
@@ -115,58 +111,7 @@ public final class IgnisDishSubmission {
         });
     }
 
-    public void submitRound(ServerPlayer player, CompetitionSavedData data, CompetitionRecord record, ItemStack held) {
-        Optional<DishProvenance.Marker> marker = DishProvenance.read(held);
-        if (marker.isEmpty()) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.unverified_dish"), true);
-            return;
-        }
-        DishProvenance.Marker proof = marker.get();
-        if (!proof.competitionId().equals(record.competitionId) || proof.round() != record.currentRound) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.wrong_competition_dish"), true);
-            return;
-        }
-        Optional<CookedDishEvidence> playerEvidenceOptional = record.evidence(proof.dishId());
-        Optional<CookedDishEvidence> blazeEvidenceOptional = record.evidence(record.currentBlazeDishId);
-        if (playerEvidenceOptional.isEmpty() || blazeEvidenceOptional.isEmpty()
-                || record.blazeWorkState != BlazeChefController.WorkState.FINISHED) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.wait_blaze"), true);
-            return;
-        }
-        CookedDishEvidence playerEvidence = playerEvidenceOptional.get();
-        CookedDishEvidence blazeEvidence = blazeEvidenceOptional.get();
-        ItemStack expected = CookeryIntegration.expectedDish(player.serverLevel().getServer(), record.currentRecipe());
-        if (playerEvidence.submitted || blazeEvidence.submitted
-                || !playerEvidence.authorId.equals(player.getUUID())
-                || playerEvidence.round != record.currentRound
-                || !playerEvidence.recipeId.equals(record.currentRecipe())
-                || !held.is(expected.getItem())) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.invalid_or_used_dish"), true);
-            return;
-        }
-
-        DishQualityEvaluator.Evaluation playerEvaluation = DishQualityEvaluator.evaluate(playerEvidence);
-        DishQualityEvaluator.Evaluation blazeEvaluation = DishQualityEvaluator.evaluate(blazeEvidence);
-        // 全部校验通过后一次性提交；先消费再标记，避免未经消费的重复得分。
-        held.shrink(1);
-        playerEvidence.submitted = true;
-        blazeEvidence.submitted = true;
-        record.playerSubmittedCount++;
-        record.blazeSubmittedCount++;
-        record.playerScores.add(playerEvaluation.score());
-        record.blazeScores.add(blazeEvaluation.score());
-        record.playerTotal += playerEvaluation.score();
-        record.blazeTotal += blazeEvaluation.score();
-        Entity chef = player.serverLevel().getEntity(record.blazeChefId);
-        if (chef instanceof Mob mob) mob.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-        record.state = CompetitionState.ROUND_SUBMITTED;
-        record.stateTicks = 0;
-        data.setDirty();
-        player.sendSystemMessage(Component.literal("玩家评分依据：" + String.join("，", playerEvaluation.reasons())));
-        player.sendSystemMessage(Component.literal("烈焰人评分依据：" + String.join("，", blazeEvaluation.reasons())));
-    }
-
-    public void tryJudgePlated(ServerLevel level, CompetitionSavedData data, CompetitionRecord record) {
+    public void tryJudgePlated(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record) {
         if (record.playerPlatedDishId == null || record.blazePlatedDishId == null
                 || record.blazeWorkState != BlazeChefController.WorkState.FINISHED) {
             resetPlatedJudgingTimer(data, record);
@@ -201,7 +146,7 @@ public final class IgnisDishSubmission {
 
         if (record.platedJudgingAtGameTime == 0) {
             record.platedJudgingAtGameTime = level.getGameTime() + 40;
-            data.setDirty();
+            data.changed(record);
             ServerPlayer player = level.getServer().getPlayerList().getPlayer(record.playerId);
             if (player != null) player.displayClientMessage(
                     Component.translatable("message.culinary_cataclysm.dishes_displaying"), true);
@@ -223,7 +168,7 @@ public final class IgnisDishSubmission {
         record.blazeTotal += blazeEvaluation.score();
         record.state = CompetitionState.ROUND_SUBMITTED;
         record.stateTicks = 0;
-        data.setDirty();
+        data.changed(record);
         ServerPlayer player = level.getServer().getPlayerList().getPlayer(record.playerId);
         if (player != null) {
             player.sendSystemMessage(Component.literal("玩家评分依据：" + String.join("，", playerEvaluation.reasons())));
@@ -231,10 +176,10 @@ public final class IgnisDishSubmission {
         }
     }
 
-    private static void resetPlatedJudgingTimer(CompetitionSavedData data, CompetitionRecord record) {
+    private static void resetPlatedJudgingTimer(IgnisChallengeRegistry data, CompetitionRecord record) {
         if (record.platedJudgingAtGameTime != 0) {
             record.platedJudgingAtGameTime = 0;
-            data.setDirty();
+            data.changed(record);
         }
     }
 

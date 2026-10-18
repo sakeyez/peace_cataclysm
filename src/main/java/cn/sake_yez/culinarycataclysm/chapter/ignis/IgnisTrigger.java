@@ -4,7 +4,6 @@ import cn.sake_yez.culinarycataclysm.boss.IgnisPeaceController;
 import cn.sake_yez.culinarycataclysm.build.ArenaPlacementValidator;
 import cn.sake_yez.culinarycataclysm.challenge.ChallengeStore;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
 import cn.sake_yez.culinarycataclysm.competition.ServingTable;
 import net.minecraft.core.BlockPos;
@@ -80,7 +79,7 @@ public final class IgnisTrigger {
     }
 
     private void startFromAltar(ServerLevel level, ServerPlayer player, Entity ignis, BlockPos altarPos) {
-        CompetitionSavedData data = CompetitionSavedData.get(level);
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(level);
         ChallengeStore store = ChallengeStore.get(level);
         if (store.byPlayer(player.getUUID()).isPresent() || store.byBoss(ignis.getUUID()).isPresent()) {
             player.sendSystemMessage(Component.translatable("message.culinary_cataclysm.already_active"));
@@ -97,17 +96,12 @@ public final class IgnisTrigger {
             player.sendSystemMessage(Component.literal("比赛菜谱配置错误：" + exception.getMessage()));
             return;
         }
-        // 玩家从祭坛南侧望向北侧：在上一版基础上再向北移三格，直接沿用大厅地板。
+        // 玩家从祭坛南侧望向北侧；场地沿用大厅地板。
         // 焰魔留在祭坛上，不跟随厨房移动。
         BlockPos origin = altarPos.offset(-10, -2, -24);
         BlockPos center = altarPos.above();
         CompetitionRecord record = new CompetitionRecord(UUID.randomUUID(), player.getUUID(), ignis.getUUID(),
-                level.dimension().location(), center, origin.offset(4, 2, 1), origin.offset(12, 2, 1), recipes);
-        record.battlefieldOrigin = origin;
-        record.twoSidedBuild = true;
-        record.mirroredBuild = true;
-        record.aboveGroundOnly = true;
-        record.platedSubmission = true;
+                level.dimension().location(), center, origin, recipes);
         final ArenaPlacementValidator.Result placement;
         try {
             placement = buildController.prepare(level, record);

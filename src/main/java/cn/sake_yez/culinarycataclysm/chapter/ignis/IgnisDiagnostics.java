@@ -1,7 +1,6 @@
 package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.integration.CookeryIntegration;
 import cn.sake_yez.culinarycataclysm.npc.BlazeChefController;
 import com.mojang.brigadier.context.CommandContext;
@@ -23,7 +22,7 @@ public final class IgnisDiagnostics {
         CommandSourceStack source = context.getSource();
         ServerPlayer player = source.getPlayer();
         if (player == null) return 0;
-        Optional<CompetitionRecord> optional = CompetitionSavedData.get(source.getLevel()).byPlayer(player.getUUID());
+        Optional<CompetitionRecord> optional = IgnisChallengeRegistry.get(source.getLevel()).byPlayer(player.getUUID());
         if (optional.isEmpty()) {
             source.sendFailure(Component.translatable("message.culinary_cataclysm.no_active"));
             return 0;

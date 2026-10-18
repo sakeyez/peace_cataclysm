@@ -36,10 +36,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class KitchenTemplateManager {
-    public static final ResourceLocation PLAYER = ResourceLocation.fromNamespaceAndPath((String)"culinary_cataclysm", (String)"culinary_kitchens/player_kitchen.nbt");
-    public static final ResourceLocation BLAZE = ResourceLocation.fromNamespaceAndPath((String)"culinary_cataclysm", (String)"culinary_kitchens/blaze_kitchen.nbt");
     public static final ResourceLocation BATTLEFIELD = ResourceLocation.fromNamespaceAndPath("culinary_cataclysm", "culinary_kitchens/battlefield.nbt");
-    public static final ResourceLocation BATTLEFIELD_LEGACY = ResourceLocation.fromNamespaceAndPath("culinary_cataclysm", "culinary_kitchens/battlefield_legacy.nbt");
 
     private KitchenTemplateManager() {
     }

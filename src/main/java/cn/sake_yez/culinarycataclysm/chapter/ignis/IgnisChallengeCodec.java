@@ -15,7 +15,7 @@ import java.util.List;
 public final class IgnisChallengeCodec {
     public static final ResourceLocation CHAPTER_ID = ResourceLocation.fromNamespaceAndPath(
             "culinary_cataclysm", "ignis_competition");
-    public static final int CHAPTER_DATA_VERSION = 1;
+    public static final int CHAPTER_DATA_VERSION = 2;
 
     private IgnisChallengeCodec() {
     }

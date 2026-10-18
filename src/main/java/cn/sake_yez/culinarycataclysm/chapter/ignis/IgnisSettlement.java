@@ -2,7 +2,6 @@ package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRewardHandler;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -12,7 +11,7 @@ public final class IgnisSettlement {
     private IgnisSettlement() {
     }
 
-    public static void tickFinalResult(ServerLevel level, CompetitionSavedData data, CompetitionRecord record) {
+    public static void tickFinalResult(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record) {
         ServerPlayer player = level.getServer().getPlayerList().getPlayer(record.playerId);
         if (!record.finalResultResolved && player != null) {
             Component result;
@@ -26,14 +25,14 @@ public final class IgnisSettlement {
             }
             IgnisPresentation.announce(level, record, result);
             record.finalResultResolved = true;
-            data.setDirty();
+            data.changed(record);
         }
         if (record.finalResultResolved && record.stateTicks >= 200) {
             record.cleanupTargetCount = record.buildCursor;
             record.buildCursor = 0;
             record.state = CompetitionState.CLEANUP;
             record.stateTicks = 0;
-            data.setDirty();
+            data.changed(record);
         }
     }
 }

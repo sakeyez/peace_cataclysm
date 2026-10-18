@@ -36,8 +36,6 @@ import java.util.TreeMap;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -45,7 +43,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
@@ -61,28 +58,18 @@ public final class MagicSchematicBuilder {
     private static final int FLIGHT_TICKS = 32;
     private static final int DROP_HEIGHT = 16;
     private static final BlockPos BLAZE_STOOL_OFFSET = new BlockPos(14, 3, 9);
-    private static final ResourceLocation STOOL_ID = ResourceLocation.fromNamespaceAndPath(
-            "kaleidoscope_cookery", "cook_stool_crimson");
     private final Map<UUID, BuildPlan> plans = new HashMap<UUID, BuildPlan>();
     private final Map<UUID, List<BuildTarget>> targetPlans = new HashMap<>();
     private final Map<UUID, List<FlyingBlock>> flights = new HashMap<UUID, List<FlyingBlock>>();
 
     public ArenaPlacementValidator.Result prepare(ServerLevel level, CompetitionRecord record) throws IOException {
         BuildPlan plan = this.loadPlan(level, record);
-        if (record.battlefieldOrigin != null) {
-            ArenaPlacementValidator.Result result = ArenaPlacementValidator.validate(level, record.battlefieldOrigin,
-                    battlefieldBlocks(plan, record), record.arenaCenter.below());
-            if (result.valid()) {
-                record.preservedBattlefieldBlocks.addAll(result.preservedBlocks());
-                record.originalBattlefieldFloor.putAll(result.originalFloor());
-            }
-            return result;
+        ArenaPlacementValidator.Result result = ArenaPlacementValidator.validate(level, record.battlefieldOrigin,
+                battlefieldBlocks(plan), record.arenaCenter.below());
+        if (result.valid()) {
+            record.preservedBattlefieldBlocks.addAll(result.preservedBlocks());
         }
-        ArenaPlacementValidator.Result playerResult = ArenaPlacementValidator.validate(level, record.playerKitchenOrigin, plan.playerBlocks());
-        if (!playerResult.valid()) {
-            return playerResult;
-        }
-        return ArenaPlacementValidator.validate(level, record.blazeKitchenOrigin, plan.blazeBlocks());
+        return result;
     }
 
     public BuildResult tick(ServerLevel level, CompetitionRecord record) {
@@ -101,8 +88,7 @@ public final class MagicSchematicBuilder {
         while (iterator.hasNext()) {
             FlyingBlock flight = iterator.next();
             ++flight.age;
-            boolean omittedStool = isBlazeStoolTarget(record, flight.templateBlock);
-            if (flight.age < FLIGHT_TICKS && !omittedStool) {
+            if (flight.age < FLIGHT_TICKS) {
                 Vec3 position = flightPosition(flight, (double)flight.age / FLIGHT_TICKS);
                 if (flight.display != null && !flight.display.isRemoved()) {
                     flight.display.teleportTo(position.x, position.y, position.z);
@@ -121,17 +107,10 @@ public final class MagicSchematicBuilder {
             if (flight.display != null && !flight.display.isRemoved()) {
                 flight.display.discard();
             }
-            if (omittedStool) {
-                removeBlazeStool(level, record);
-                if (!canPlace(level, record, flight.target)) return BuildResult.BLOCKED;
-                ++record.buildCursor;
-                iterator.remove();
-                continue;
-            }
-            if (!canPlace(level, record, flight.target)) {
+            if (!canPlace(level, flight.target)) {
                 return BuildResult.BLOCKED;
             }
-            // setBlock 对“目标本来就是同一状态”的方块返回 false；地板嵌入旧场地时这是正常落位。
+            // setBlock 可能对已是目标状态的方块返回 false；只把状态仍不匹配视为错误。
             if (!level.setBlock(flight.target, flight.templateBlock.state(), 3)
                     && !level.getBlockState(flight.target).equals(flight.templateBlock.state())) {
                 return BuildResult.ERROR;
@@ -148,33 +127,22 @@ public final class MagicSchematicBuilder {
             iterator.remove();
         }
         int nextCursor = record.buildCursor + active.size();
-        int maxFlights = record.twoSidedBuild ? FLIGHT_TICKS * 2 : FLIGHT_TICKS;
-        if ((record.spiralBuild || record.mirroredBuild) && record.battlefieldOrigin != null) {
-            if (nextCursor < total) {
-                BuildTarget first = targets.get(nextCursor);
-                // 当前层全部落位后才开始下一层，镜像方块始终同刻起飞。
-                boolean sameLayer = active.isEmpty() || active.get(0).templateBlock.relativePos().getY()
-                        == first.templateBlock.relativePos().getY();
-                int groupSize = isMirroredPair(targets, nextCursor) ? 2 : 1;
-                if (sameLayer && active.size() + groupSize <= maxFlights) {
-                    for (int i = 0; i < groupSize; i++) {
-                        BuildTarget target = targets.get(nextCursor + i);
-                        if (!canPlace(level, record, target.pos)) return BuildResult.BLOCKED;
-                    }
-                    if (active.isEmpty() || record.stateTicks % 24 == 1) playBuildQuake(level, record);
-                    for (int i = 0; i < groupSize; i++) {
-                        launchFlight(level, record, targets.get(nextCursor + i), active);
-                    }
+        int maxFlights = FLIGHT_TICKS * 2;
+        if (nextCursor < total) {
+            BuildTarget first = targets.get(nextCursor);
+            // 当前层全部落位后才开始下一层，镜像方块始终同刻起飞。
+            boolean sameLayer = active.isEmpty() || active.get(0).templateBlock.relativePos().getY()
+                    == first.templateBlock.relativePos().getY();
+            int groupSize = isMirroredPair(targets, nextCursor) ? 2 : 1;
+            if (sameLayer && active.size() + groupSize <= maxFlights) {
+                for (int i = 0; i < groupSize; i++) {
+                    BuildTarget target = targets.get(nextCursor + i);
+                    if (!canPlace(level, target.pos)) return BuildResult.BLOCKED;
                 }
-            }
-        } else {
-            // 旧比赛保留原有发射节奏和目标顺序，避免存档中的 buildCursor 失效。
-            int startsThisTick = record.twoSidedBuild ? 2 : 1;
-            while (startsThisTick-- > 0 && active.size() < maxFlights && nextCursor < total) {
-                BuildTarget target = targets.get(nextCursor);
-                if (!canPlace(level, record, target.pos)) return BuildResult.BLOCKED;
-                launchFlight(level, record, target, active);
-                nextCursor++;
+                if (active.isEmpty() || record.stateTicks % 24 == 1) playBuildQuake(level, record);
+                for (int i = 0; i < groupSize; i++) {
+                    launchFlight(level, targets.get(nextCursor + i), active);
+                }
             }
         }
         if (record.buildCursor >= total && active.isEmpty()) {
@@ -194,17 +162,11 @@ public final class MagicSchematicBuilder {
                 && right.getY() == left.getY() && right.getZ() == left.getZ();
     }
 
-    private static void launchFlight(ServerLevel level, CompetitionRecord record, BuildTarget target,
+    private static void launchFlight(ServerLevel level, BuildTarget target,
                                      List<FlyingBlock> active) {
-        if (isBlazeStoolTarget(record, target.templateBlock)) {
-            active.add(new FlyingBlock(Vec3.atCenterOf(target.pos), target.pos, target.templateBlock, null));
-            return;
-        }
-        double sideOffset = !record.twoSidedBuild
-                || (record.spiralBuild || record.mirroredBuild) && target.templateBlock.relativePos().getX() == 10
+        double sideOffset = target.templateBlock.relativePos().getX() == 10
                 ? 0 : target.fromPlayerSide ? -6 : 6;
-        int dropHeight = record.twoSidedBuild ? DROP_HEIGHT : 64;
-        Vec3 source = new Vec3(target.pos.getX() + sideOffset, target.pos.getY() + dropHeight, target.pos.getZ());
+        Vec3 source = new Vec3(target.pos.getX() + sideOffset, target.pos.getY() + DROP_HEIGHT, target.pos.getZ());
         Display.BlockDisplay display = spawnFlyingDisplay(level, source, target);
         active.add(new FlyingBlock(source, target.pos, target.templateBlock, display));
         level.sendParticles(ParticleTypes.CLOUD, source.x + 0.5, source.y + 0.5, source.z + 0.5,
@@ -224,55 +186,12 @@ public final class MagicSchematicBuilder {
     }
 
     private static List<BuildTarget> buildTargets(BuildPlan plan, CompetitionRecord record) {
-        if (record.battlefieldOrigin != null) {
-            if (record.spiralBuild || record.mirroredBuild) return mirroredTargets(plan, record);
-            if (!record.twoSidedBuild) {
-                ArrayList<BuildTarget> targets = new ArrayList<>();
-                for (KitchenTemplateManager.TemplateBlock block : battlefieldBlocks(plan, record)) {
-                    BlockPos target = record.battlefieldOrigin.offset((Vec3i) block.relativePos());
-                    if (!record.preservedBattlefieldBlocks.contains(target.asLong())) {
-                        targets.add(new BuildTarget(target, block, true));
-                    }
-                }
-                return targets;
-            }
-            ArrayList<BuildTarget> playerSide = new ArrayList<>();
-            ArrayList<BuildTarget> blazeSide = new ArrayList<>();
-            boolean centerToPlayer = true;
-            for (KitchenTemplateManager.TemplateBlock block : battlefieldBlocks(plan, record)) {
-                BlockPos target = record.battlefieldOrigin.offset((Vec3i) block.relativePos());
-                if (!record.preservedBattlefieldBlocks.contains(target.asLong())) {
-                    boolean player = block.relativePos().getX() < 10
-                            || block.relativePos().getX() == 10 && centerToPlayer;
-                    if (block.relativePos().getX() == 10) centerToPlayer = !centerToPlayer;
-                    (player ? playerSide : blazeSide).add(new BuildTarget(target, block, player));
-                }
-            }
-            ArrayList<BuildTarget> targets = new ArrayList<>(playerSide.size() + blazeSide.size());
-            for (int i = 0; i < Math.max(playerSide.size(), blazeSide.size()); i++) {
-                if (i < playerSide.size()) targets.add(playerSide.get(i));
-                if (i < blazeSide.size()) targets.add(blazeSide.get(i));
-            }
-            return targets;
-        }
-        ArrayList<BuildTarget> targets = new ArrayList<BuildTarget>(plan.playerBlocks().size() + plan.blazeBlocks().size());
-        int max = Math.max(plan.playerBlocks().size(), plan.blazeBlocks().size());
-        for (int index = 0; index < max; ++index) {
-            KitchenTemplateManager.TemplateBlock block;
-            if (index < plan.playerBlocks().size()) {
-                block = plan.playerBlocks().get(index);
-                targets.add(new BuildTarget(record.playerKitchenOrigin.offset((Vec3i)block.relativePos()), block, true));
-            }
-            if (index >= plan.blazeBlocks().size()) continue;
-            block = plan.blazeBlocks().get(index);
-            targets.add(new BuildTarget(record.blazeKitchenOrigin.offset((Vec3i)block.relativePos()), block, false));
-        }
-        return targets;
+        return mirroredTargets(plan, record);
     }
 
     private static List<BuildTarget> mirroredTargets(BuildPlan plan, CompetitionRecord record) {
         Map<Integer, Map<BlockPos, BuildTarget>> layers = new TreeMap<>();
-        for (KitchenTemplateManager.TemplateBlock block : battlefieldBlocks(plan, record)) {
+        for (KitchenTemplateManager.TemplateBlock block : battlefieldBlocks(plan)) {
             BlockPos relative = block.relativePos();
             BlockPos target = record.battlefieldOrigin.offset((Vec3i)relative);
             if (record.preservedBattlefieldBlocks.contains(target.asLong())) continue;
@@ -283,30 +202,16 @@ public final class MagicSchematicBuilder {
         for (Map.Entry<Integer, Map<BlockPos, BuildTarget>> layer : layers.entrySet()) {
             int y = layer.getKey();
             Map<BlockPos, BuildTarget> pending = layer.getValue();
-            if (record.spiralBuild) {
-                // 已开工比赛沿用上一版螺旋顺序，避免存档中的 buildCursor 指向其他方块。
-                for (int ring = 0; ring < 5; ring++) {
-                    int minX = ring;
-                    int maxX = 9 - ring;
-                    int minZ = ring;
-                    int maxZ = 20 - ring;
-                    for (int x = minX; x <= maxX; x++) appendMirrored(pending, result, x, y, minZ);
-                    for (int z = minZ + 1; z <= maxZ; z++) appendMirrored(pending, result, maxX, y, z);
-                    for (int x = maxX - 1; x >= minX; x--) appendMirrored(pending, result, x, y, maxZ);
-                    for (int z = maxZ - 1; z > minZ; z--) appendMirrored(pending, result, minX, y, z);
-                }
-            } else {
-                // 新比赛按行推进，两侧同一位置的方块紧邻排列并同刻落下。
-                for (int z = 0; z <= 20; z++) {
-                    for (int x = 0; x < 10; x++) appendMirrored(pending, result, x, y, z);
-                }
+            // 按行推进，两侧同一位置的方块紧邻排列并同刻落下。
+            for (int z = 0; z <= 20; z++) {
+                for (int x = 0; x < 10; x++) appendMirrored(pending, result, x, y, z);
             }
             // 中线没有镜像伙伴，从正上方独立落下，不打断左右的成对施工。
             for (int z = 0; z <= 20; z++) {
                 BuildTarget center = pending.remove(new BlockPos(10, y, z));
                 if (center != null) result.add(center);
             }
-            // 兼容模板未来增加边界外方块，保证目标不因排序被遗漏。
+            // 模板未来增加边界外方块时，保证目标不因排序被遗漏。
             pending.values().stream()
                     .sorted((a, b) -> {
                         int z = Integer.compare(a.templateBlock.relativePos().getZ(), b.templateBlock.relativePos().getZ());
@@ -324,26 +229,10 @@ public final class MagicSchematicBuilder {
         if (right != null) result.add(right);
     }
 
-    private static List<KitchenTemplateManager.TemplateBlock> battlefieldBlocks(
-            BuildPlan plan, CompetitionRecord record) {
-        return record.aboveGroundOnly
-                ? plan.battlefieldBlocks().stream()
-                    .filter(block -> block.relativePos().getY() > 0).toList()
-                : plan.battlefieldBlocks();
-    }
-
-    private static boolean isBlazeStoolTarget(CompetitionRecord record,
-                                               KitchenTemplateManager.TemplateBlock block) {
-        return record.battlefieldOrigin != null && block.relativePos().equals(BLAZE_STOOL_OFFSET);
-    }
-
-    /** Removes the stool left by an arena built before this template change. */
-    public static void removeBlazeStool(ServerLevel level, CompetitionRecord record) {
-        if (record.battlefieldOrigin == null) return;
-        BlockPos pos = record.battlefieldOrigin.offset(BLAZE_STOOL_OFFSET);
-        if (level.hasChunkAt(pos) && STOOL_ID.equals(BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()))) {
-            level.removeBlock(pos, false);
-        }
+    private static List<KitchenTemplateManager.TemplateBlock> battlefieldBlocks(BuildPlan plan) {
+        return plan.battlefieldBlocks().stream()
+                .filter(block -> block.relativePos().getY() > 0)
+                .filter(block -> !block.relativePos().equals(BLAZE_STOOL_OFFSET)).toList();
     }
 
     private static Vec3 flightPosition(FlyingBlock flight, double progress) {
@@ -352,14 +241,10 @@ public final class MagicSchematicBuilder {
                 Mth.lerp(fall, flight.source.y, flight.target.getY()), flight.source.z);
     }
 
-    private static boolean canPlace(ServerLevel level, CompetitionRecord record, BlockPos target) {
+    private static boolean canPlace(ServerLevel level, BlockPos target) {
         if (!level.hasChunkAt(target) || !level.getFluidState(target).isEmpty()
                 || level.getBlockEntity(target) != null) return false;
-        CompoundTag original = record.originalBattlefieldFloor.get(target.asLong());
-        return original != null
-                ? original.getString("Name").equals(
-                    NbtUtils.writeBlockState(level.getBlockState(target)).getString("Name"))
-                : level.getBlockState(target).isAir();
+        return level.getBlockState(target).isAir();
     }
 
     private static Display.BlockDisplay spawnFlyingDisplay(ServerLevel level, Vec3 source, BuildTarget target) {
@@ -386,11 +271,8 @@ public final class MagicSchematicBuilder {
         if (existing != null) {
             return existing;
         }
-        BuildPlan loaded = record.battlefieldOrigin != null
-                ? new BuildPlan(List.of(), List.of(), KitchenTemplateManager.load(level.getServer(),
-                    record.platedSubmission ? KitchenTemplateManager.BATTLEFIELD : KitchenTemplateManager.BATTLEFIELD_LEGACY))
-                : new BuildPlan(KitchenTemplateManager.load(level.getServer(), KitchenTemplateManager.PLAYER),
-                    KitchenTemplateManager.load(level.getServer(), KitchenTemplateManager.BLAZE), List.of());
+        BuildPlan loaded = new BuildPlan(KitchenTemplateManager.load(level.getServer(),
+                KitchenTemplateManager.BATTLEFIELD));
         this.plans.put(record.competitionId, loaded);
         return loaded;
     }
@@ -441,8 +323,7 @@ public final class MagicSchematicBuilder {
         }
         List<BuildTarget> targets = this.targetPlans.computeIfAbsent(record.competitionId,
                 ignored -> buildTargets(plan, record));
-        int total = record.cleanupTargetCount >= 0
-                ? Math.min(record.cleanupTargetCount, targets.size()) : targets.size();
+        int total = Math.min(record.cleanupTargetCount, targets.size());
         int budget = 0;
         while (budget < 30 && record.buildCursor < total) {
             BuildTarget buildTarget = targets.get(total - 1 - record.buildCursor);
@@ -451,21 +332,8 @@ public final class MagicSchematicBuilder {
             if (!level.hasChunkAt(target)) {
                 return BuildResult.BLOCKED;
             }
-            if (isBlazeStoolTarget(record, templateBlock)) {
-                removeBlazeStool(level, record);
-                ++budget;
-                ++record.buildCursor;
-                continue;
-            }
             if (level.getBlockState(target).is(templateBlock.state().getBlock())) {
-                CompoundTag original = record.originalBattlefieldFloor.get(target.asLong());
-                if (original != null) {
-                    BlockState originalState = NbtUtils.readBlockState(
-                            level.registryAccess().lookupOrThrow(Registries.BLOCK), original);
-                    level.setBlock(target, originalState, 3);
-                } else {
-                    level.removeBlock(target, false);
-                }
+                level.removeBlock(target, false);
                 level.sendParticles((ParticleOptions)ParticleTypes.SMOKE, (double)target.getX() + 0.5, (double)target.getY() + 0.5, (double)target.getZ() + 0.5, 2, 0.1, 0.1, 0.1, 0.01);
             }
             ++budget;
@@ -479,9 +347,7 @@ public final class MagicSchematicBuilder {
         return BuildResult.RUNNING;
     }
 
-    private record BuildPlan(List<KitchenTemplateManager.TemplateBlock> playerBlocks,
-                             List<KitchenTemplateManager.TemplateBlock> blazeBlocks,
-                             List<KitchenTemplateManager.TemplateBlock> battlefieldBlocks) {
+    private record BuildPlan(List<KitchenTemplateManager.TemplateBlock> battlefieldBlocks) {
     }
 
     public static enum BuildResult {

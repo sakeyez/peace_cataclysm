@@ -56,7 +56,6 @@ public final class ArenaAudienceController {
     }
 
     public static void maintain(ServerLevel level, CompetitionRecord record) {
-        if (record.battlefieldOrigin == null) return;
         boolean[] occupied = new boolean[SEATS.size()];
         for (Villager villager : audience(level, record)) {
             int seat = villager.getPersistentData().getInt(SEAT_KEY);
@@ -103,7 +102,6 @@ public final class ArenaAudienceController {
     }
 
     private static List<Villager> audience(ServerLevel level, CompetitionRecord record) {
-        if (record.battlefieldOrigin == null) return List.of();
         AABB bounds = new AABB(record.battlefieldOrigin.offset(-23, 2, -8))
                 .expandTowards(66, 20, 64);
         return level.getEntitiesOfClass(Villager.class, bounds,

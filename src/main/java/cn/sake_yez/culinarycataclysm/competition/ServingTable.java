@@ -40,61 +40,6 @@ public final class ServingTable {
         return record.servingTableBuilt;
     }
 
-    /** 将上一版误放在锅具前方玻璃上的两张桌子迁到九格玻璃中心，供进行中的比赛继续使用。 */
-    public static boolean migratePreviousLayout(ServerLevel level, CompetitionRecord record) {
-        if (!record.servingTableBuilt || bases(record).stream().allMatch(pos -> isReady(level, pos))) return true;
-        BlockPos oldPlayer = record.battlefieldOrigin.offset(2, 3, 7);
-        BlockPos oldBlaze = record.battlefieldOrigin.offset(18, 3, 7);
-        List<BlockPos> oldBases = List.of(oldPlayer, oldBlaze);
-        if (!oldBases.stream().allMatch(pos -> isReady(level, pos)) || !canBuild(level, record)) return false;
-        BlockState playerDish = level.getBlockState(oldPlayer.above());
-        BlockState blazeDish = level.getBlockState(oldBlaze.above());
-        if (!validOldDish(playerDish, record.playerPlatedDishId != null)
-                || !validOldDish(blazeDish, record.blazePlatedDishId != null)) return false;
-        List<BlockState> oldTables = oldBases.stream().map(level::getBlockState).toList();
-        List<BlockPos> newBases = bases(record);
-        for (int i = 0; i < newBases.size(); i++) {
-            BlockPos newPos = newBases.get(i);
-            if (!level.setBlockAndUpdate(newPos, oldTables.get(i))) {
-                rollbackMigration(level, newBases);
-                return false;
-            }
-            if (level.getBlockEntity(newPos) instanceof TableBlockEntity table) {
-                table.setColor(DyeColor.RED);
-                table.setChanged();
-                level.sendBlockUpdated(newPos, oldTables.get(i), oldTables.get(i), 3);
-            } else {
-                rollbackMigration(level, newBases);
-                return false;
-            }
-        }
-        if (!playerDish.isAir() && !level.setBlockAndUpdate(record.playerServingBase().above(), playerDish)
-                || !blazeDish.isAir() && !level.setBlockAndUpdate(record.blazeServingBase().above(), blazeDish)
-                || !level.getBlockState(record.playerServingBase().above()).equals(playerDish)
-                || !level.getBlockState(record.blazeServingBase().above()).equals(blazeDish)) {
-            rollbackMigration(level, newBases);
-            return false;
-        }
-        for (BlockPos oldPos : oldBases) {
-            if (level.getBlockState(oldPos.above()).getBlock() instanceof FoodBiteBlock) level.removeBlock(oldPos.above(), false);
-            level.removeBlock(oldPos, false);
-        }
-        return newBases.stream().allMatch(pos -> isReady(level, pos));
-    }
-
-    private static void rollbackMigration(ServerLevel level, List<BlockPos> newBases) {
-        for (BlockPos pos : newBases) {
-            if (level.getBlockState(pos.above()).getBlock() instanceof FoodBiteBlock) level.removeBlock(pos.above(), false);
-            if (BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).equals(WARPED_TABLE)) {
-                level.removeBlock(pos, false);
-            }
-        }
-    }
-
-    private static boolean validOldDish(BlockState state, boolean hasPlatedDish) {
-        return hasPlatedDish ? state.getBlock() instanceof FoodBiteBlock : state.isAir();
-    }
-
     public static boolean isReady(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         return BuiltInRegistries.BLOCK.getKey(state.getBlock()).equals(WARPED_TABLE)

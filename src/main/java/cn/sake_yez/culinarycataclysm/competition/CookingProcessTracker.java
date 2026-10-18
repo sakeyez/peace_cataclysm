@@ -1,6 +1,7 @@
 package cn.sake_yez.culinarycataclysm.competition;
 
 import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisCookeryStations;
+import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisChallengeRegistry;
 
 import cn.sake_yez.culinarycataclysm.integration.CookeryIntegration;
 import net.minecraft.core.BlockPos;
@@ -60,7 +61,7 @@ public final class CookingProcessTracker {
         }
     }
 
-    public void tick(MinecraftServer server, CompetitionSavedData data) {
+    public void tick(MinecraftServer server, IgnisChallengeRegistry data) {
         var iterator = pending.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<InteractionKey, PendingInteraction> entry = iterator.next();
@@ -104,7 +105,7 @@ public final class CookingProcessTracker {
         }
     }
 
-    private static boolean processAfter(ServerPlayer player, CompetitionSavedData data, CompetitionRecord record,
+    private static boolean processAfter(ServerPlayer player, IgnisChallengeRegistry data, CompetitionRecord record,
                                         PendingInteraction pending) {
         CookeryIntegration.RecipeFacts facts = CookeryIntegration.recipeFactsUnchecked(
                 player.serverLevel().getServer(), record.currentRecipe());
@@ -131,7 +132,7 @@ public final class CookingProcessTracker {
                     && (after.status() != pending.before().status() || !after.ingredients().isEmpty())) {
                 record.playerCookingStartedTick = record.stateTicks;
             }
-            data.setDirty();
+            data.changed(record);
         }
 
         if (!pending.isExtractionCandidate()) return true;
@@ -167,10 +168,9 @@ public final class CookingProcessTracker {
         record.dishEvidence.add(evidence);
         record.currentPlayerDishId = dishId;
         record.playerProducedCount++;
-        data.setDirty();
-        player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(record.platedSubmission
-                ? "message.culinary_cataclysm.dish_verified_plating"
-                : "message.culinary_cataclysm.dish_verified"));
+        data.changed(record);
+        player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                "message.culinary_cataclysm.dish_verified_plating"));
         LOGGER.info("比赛菜品来源已验证：competition={}, round={}, player={}, recipe={}, result={}, quality={}, dish={}",
                 record.competitionId, record.currentRound + 1, player.getGameProfile().getName(),
                 record.currentRecipe(), resultItemId, evidence.cookeryQuality, dishId);

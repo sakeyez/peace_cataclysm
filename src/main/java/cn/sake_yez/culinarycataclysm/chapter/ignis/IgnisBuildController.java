@@ -4,7 +4,6 @@ import cn.sake_yez.culinarycataclysm.boss.IgnisPeaceController;
 import cn.sake_yez.culinarycataclysm.build.ArenaPlacementValidator;
 import cn.sake_yez.culinarycataclysm.build.MagicSchematicBuilder;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
 import cn.sake_yez.culinarycataclysm.competition.ServingTable;
 import cn.sake_yez.culinarycataclysm.npc.ArenaAudienceController;
@@ -25,26 +24,22 @@ public final class IgnisBuildController {
         builder.cancelVisuals(record);
     }
 
-    public void removeBlazeStool(ServerLevel level, CompetitionRecord record) {
-        builder.removeBlazeStool(level, record);
-    }
-
-    public void tickBuilding(ServerLevel level, CompetitionSavedData data, CompetitionRecord record) {
+    public void tickBuilding(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record) {
         Entity ignis = level.getEntity(record.ignisId);
         if (ignis != null) {
             IgnisPeaceController.setCeremonialSword(ignis, true);
-            if (record.twoSidedBuild && record.stateTicks == 1) IgnisPeaceController.playBuildGesture(ignis);
-            if (record.twoSidedBuild && record.stateTicks == 25) IgnisPeaceController.stopBuildGesture(ignis);
+            if (record.stateTicks == 1) IgnisPeaceController.playBuildGesture(ignis);
+            if (record.stateTicks == 25) IgnisPeaceController.stopBuildGesture(ignis);
         }
         int previousCursor = record.buildCursor;
         MagicSchematicBuilder.BuildResult result = builder.tick(level, record);
-        if (record.buildCursor != previousCursor) data.setDirty();
+        if (record.buildCursor != previousCursor) data.changed(record);
         if (result == MagicSchematicBuilder.BuildResult.COMPLETE) {
-            if (record.platedSubmission && !ServingTable.build(level, record)) {
+            if (!ServingTable.build(level, record)) {
                 record.interruptedState = CompetitionState.BUILDING;
                 record.state = CompetitionState.INTERRUPTED;
                 record.stateTicks = 0;
-                data.setDirty();
+                data.changed(record);
                 IgnisPresentation.announce(level, record, Component.literal("餐桌搭建受阻，请检查两侧九格玻璃正中间上方后恢复比赛。"));
                 return;
             }
@@ -65,14 +60,14 @@ public final class IgnisBuildController {
             record.interruptedState = CompetitionState.BUILDING;
             record.state = CompetitionState.INTERRUPTED;
             record.stateTicks = 0;
-            data.setDirty();
+            data.changed(record);
             IgnisPresentation.announce(level, record, Component.translatable("message.culinary_cataclysm.build_interrupted"));
         }
     }
 
-    public void tickCleanup(ServerLevel level, CompetitionSavedData data, CompetitionRecord record) {
+    public void tickCleanup(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record) {
         ArenaAudienceController.cleanup(level, record);
-        if (record.platedSubmission) ServingTable.cleanup(level, record);
+        ServingTable.cleanup(level, record);
         MagicSchematicBuilder.BuildResult result = builder.cleanup(level, record);
         if (result == MagicSchematicBuilder.BuildResult.COMPLETE) {
             if (record.blazeChefId != null) {
@@ -82,17 +77,17 @@ public final class IgnisBuildController {
             record.blazeInventory.clear();
             record.state = CompetitionState.COMPLETED;
             record.stateTicks = 0;
-            data.setDirty();
+            data.changed(record);
         } else if (result == MagicSchematicBuilder.BuildResult.ERROR) {
             record.interruptedState = CompetitionState.CLEANUP;
             record.state = CompetitionState.INTERRUPTED;
-            data.setDirty();
+            data.changed(record);
         }
     }
 
-    private static void transition(CompetitionSavedData data, CompetitionRecord record, CompetitionState state) {
+    private static void transition(IgnisChallengeRegistry data, CompetitionRecord record, CompetitionState state) {
         record.state = state;
         record.stateTicks = 0;
-        data.setDirty();
+        data.changed(record);
     }
 }

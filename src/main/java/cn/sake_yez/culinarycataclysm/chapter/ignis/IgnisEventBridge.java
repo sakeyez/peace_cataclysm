@@ -1,6 +1,5 @@
-package cn.sake_yez.culinarycataclysm.competition;
+package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
-import cn.sake_yez.culinarycataclysm.chapter.ignis.IgnisChapter;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
@@ -14,7 +13,7 @@ import net.neoforged.neoforge.event.level.PistonEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /** NeoForge 入口；Ignis 的玩法和状态调度由章节持有。 */
-public final class CookingCompetitionManager {
+public final class IgnisEventBridge {
     private final IgnisChapter ignis = new IgnisChapter();
 
     @SubscribeEvent

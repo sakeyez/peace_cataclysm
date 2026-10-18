@@ -1,7 +1,6 @@
 package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.boss.IgnisPeaceController;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -33,25 +32,25 @@ public final class IgnisProtection {
     }
 
     public static void onItemJoin(ItemEntity item, ServerLevel level) {
-        CompetitionSavedData.get(level).at(level.dimension().location(), item.blockPosition()).ifPresent(record -> {
+        IgnisChallengeRegistry.get(level).at(level.dimension().location(), item.blockPosition()).ifPresent(record -> {
             if (record.isBlazeKitchen(item.blockPosition())) item.setNeverPickUp();
         });
     }
 
     public static void onBreak(BlockEvent.BreakEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
-        CompetitionSavedData.get(level).at(level.dimension().location(), event.getPos()).ifPresent(record -> event.setCanceled(true));
+        IgnisChallengeRegistry.get(level).at(level.dimension().location(), event.getPos()).ifPresent(record -> event.setCanceled(true));
     }
 
     public static void onExplosion(ExplosionEvent.Detonate event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
-        CompetitionSavedData data = CompetitionSavedData.get(level);
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(level);
         event.getAffectedBlocks().removeIf(pos -> data.at(level.dimension().location(), pos).isPresent());
     }
 
     public static void onPiston(PistonEvent.Pre event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
-        CompetitionSavedData data = CompetitionSavedData.get(level);
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(level);
         if (data.at(level.dimension().location(), event.getPos()).isPresent()
                 || data.at(level.dimension().location(), event.getFaceOffsetPos()).isPresent()) {
             event.setCanceled(true);
@@ -68,7 +67,7 @@ public final class IgnisProtection {
 
     public static void onFluidPlace(BlockEvent.FluidPlaceBlockEvent event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
-        CompetitionSavedData.get(level).at(level.dimension().location(), event.getPos())
+        IgnisChallengeRegistry.get(level).at(level.dimension().location(), event.getPos())
                 .ifPresent(record -> event.setCanceled(true));
     }
 }

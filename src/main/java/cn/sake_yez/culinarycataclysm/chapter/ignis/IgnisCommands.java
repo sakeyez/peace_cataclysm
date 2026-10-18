@@ -1,7 +1,6 @@
 package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
@@ -32,7 +31,7 @@ public final class IgnisCommands {
         CommandSourceStack source = context.getSource();
         ServerPlayer player = source.getPlayer();
         if (player == null) return 0;
-        CompetitionSavedData data = CompetitionSavedData.get(source.getLevel());
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(source.getLevel());
         Optional<CompetitionRecord> optional = data.byPlayer(player.getUUID());
         if (optional.isEmpty()) {
             source.sendFailure(Component.translatable("message.culinary_cataclysm.no_active"));
@@ -46,7 +45,7 @@ public final class IgnisCommands {
                     : record.interruptedState;
             record.interruptedState = CompetitionState.IDLE;
             record.stateTicks = 0;
-            data.setDirty();
+            data.changed(record);
         }
         source.sendSuccess(() -> IgnisPresentation.statusText(record), false);
         return 1;
@@ -55,7 +54,7 @@ public final class IgnisCommands {
     private int cancel(CommandContext<CommandSourceStack> context) {
         ServerPlayer player = context.getSource().getPlayer();
         if (player == null) return 0;
-        CompetitionSavedData data = CompetitionSavedData.get(player.serverLevel());
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(player.serverLevel());
         Optional<CompetitionRecord> optional = data.byPlayer(player.getUUID());
         if (optional.isEmpty()) {
             context.getSource().sendFailure(Component.translatable("message.culinary_cataclysm.no_active"));
@@ -71,7 +70,7 @@ public final class IgnisCommands {
         }
         record.state = CompetitionState.CLEANUP;
         record.stateTicks = 0;
-        data.setDirty();
+        data.changed(record);
         context.getSource().sendSuccess(() -> Component.literal("正在还原比赛场地，完成后可重新召唤焰魔。"), false);
         return 1;
     }
@@ -80,7 +79,7 @@ public final class IgnisCommands {
         CommandSourceStack source = context.getSource();
         ServerPlayer player = source.getPlayer();
         if (player == null) return 0;
-        Optional<CompetitionRecord> optional = CompetitionSavedData.get(source.getLevel()).byPlayer(player.getUUID());
+        Optional<CompetitionRecord> optional = IgnisChallengeRegistry.get(source.getLevel()).byPlayer(player.getUUID());
         if (optional.isEmpty()) {
             source.sendFailure(Component.translatable("message.culinary_cataclysm.no_active"));
             return 0;

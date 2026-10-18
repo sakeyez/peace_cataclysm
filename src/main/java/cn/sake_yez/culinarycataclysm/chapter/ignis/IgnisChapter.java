@@ -2,7 +2,6 @@ package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.boss.IgnisPeaceController;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
-import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
 import cn.sake_yez.culinarycataclysm.competition.CookingProcessTracker;
 import cn.sake_yez.culinarycataclysm.competition.ServingTable;
@@ -56,7 +55,7 @@ public final class IgnisChapter {
         MinecraftServer server = event.getServer();
         trigger.tick(server);
         dishSubmission.tick(server);
-        CompetitionSavedData data = CompetitionSavedData.get(server.overworld());
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(server.overworld());
         cookingTracker.tick(server, data);
         List<CompetitionRecord> snapshot = new ArrayList<>(data.all());
         for (CompetitionRecord record : snapshot) {
@@ -68,22 +67,17 @@ public final class IgnisChapter {
         }
     }
 
-    private void tickCompetition(ServerLevel level, CompetitionSavedData data, CompetitionRecord record) {
-        buildController.removeBlazeStool(level, record);
-        if (record.platedSubmission && record.servingTableBuilt && record.state != CompetitionState.CLEANUP
+    private void tickCompetition(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record) {
+        if (record.servingTableBuilt && record.state != CompetitionState.CLEANUP
                 && ServingTable.bases(record).stream().anyMatch(pos -> !ServingTable.isReady(level, pos))) {
-            if (!ServingTable.migratePreviousLayout(level, record)) {
-                if (record.state != CompetitionState.INTERRUPTED) {
-                    record.interruptedState = record.state;
-                    record.state = CompetitionState.INTERRUPTED;
-                    record.stateTicks = 0;
-                    data.setDirty();
-                    IgnisPresentation.announce(level, record, Component.literal("餐桌迁移受阻，请检查两侧九格玻璃的中心位置。"));
-                }
-                return;
+            if (record.state != CompetitionState.INTERRUPTED) {
+                record.interruptedState = record.state;
+                record.state = CompetitionState.INTERRUPTED;
+                record.stateTicks = 0;
+                data.changed(record);
+                IgnisPresentation.announce(level, record, Component.literal("餐桌缺失，请检查两侧九格玻璃的中心位置。"));
             }
-            data.setDirty();
-            IgnisPresentation.announce(level, record, Component.literal("两张餐桌已移到各自九格玻璃的正中间。"));
+            return;
         }
         Entity ignis = level.getEntity(record.ignisId);
         if (ignis == null && record.state != CompetitionState.CLEANUP) {
@@ -91,7 +85,7 @@ public final class IgnisChapter {
                 record.interruptedState = record.state;
                 record.state = CompetitionState.INTERRUPTED;
                 record.stateTicks = 0;
-                data.setDirty();
+                data.changed(record);
             }
             return;
         }
@@ -110,7 +104,7 @@ public final class IgnisChapter {
             }
             case ROUND_ACTIVE -> {
                 BlazeChefController.tick(level, data, record);
-                if (record.platedSubmission) dishSubmission.tryJudgePlated(level, data, record);
+                dishSubmission.tryJudgePlated(level, data, record);
             }
             case ROUND_SUBMITTED -> {
                 if (record.stateTicks >= 20) transition(data, record, CompetitionState.JUDGING);
@@ -127,13 +121,11 @@ public final class IgnisChapter {
             default -> {
             }
         }
-        if (record.stateTicks % 100 == 0) data.setDirty();
+        if (record.state != CompetitionState.COMPLETED && record.stateTicks % 100 == 0) data.changed(record);
     }
 
-    private void tickOpening(ServerLevel level, CompetitionSavedData data, CompetitionRecord record, Entity ignis) {
-        face(ignis, record.battlefieldOrigin != null
-                ? record.battlefieldOrigin.offset(10, 4, 6)
-                : record.playerKitchenOrigin.offset(11, 0, 4));
+    private void tickOpening(ServerLevel level, IgnisChallengeRegistry data, CompetitionRecord record, Entity ignis) {
+        face(ignis, record.battlefieldOrigin.offset(10, 4, 6));
         IgnisPeaceController.setCeremonialSword(ignis, record.stateTicks >= 20);
         if (record.stateTicks >= 30 && record.stateTicks <= 85 && record.stateTicks % 3 == 0) {
             level.sendParticles(ParticleTypes.FLAME, ignis.getX(), ignis.getY() + ignis.getBbHeight() + 1.5,
@@ -152,7 +144,7 @@ public final class IgnisChapter {
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         trigger.trackAltarClick(player, event.getHand(), event.getPos(), event.getItemStack());
-        CompetitionSavedData data = CompetitionSavedData.get(player.serverLevel());
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(player.serverLevel());
         Optional<CompetitionRecord> optional = data.at(player.serverLevel().dimension().location(), event.getPos());
         if (optional.isEmpty()) return;
         CompetitionRecord record = optional.get();
@@ -164,10 +156,6 @@ public final class IgnisChapter {
             return;
         }
         if (record.state == CompetitionState.ROUND_ACTIVE && record.isPlayerStation(event.getPos())) {
-            // 事件式迁移旧比赛：玩家第一次再碰锅时补写标签，不需要后台扫描。
-            if (!IgnisCookeryStations.isTaggedPlayerStation(player.serverLevel(), event.getPos(), record)) {
-                IgnisCookeryStations.markCompetitionStations(player.serverLevel(), record);
-            }
             cookingTracker.beforeStationInteraction(player, record, event.getPos());
         }
     }
@@ -190,25 +178,13 @@ public final class IgnisChapter {
             return;
         }
         if (!IgnisPeaceController.isManaged(event.getTarget())) return;
-        CompetitionSavedData data = CompetitionSavedData.get(player.serverLevel());
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(player.serverLevel());
         Optional<CompetitionRecord> optional = data.byIgnis(event.getTarget().getUUID());
         if (optional.isEmpty()) return;
         CompetitionRecord record = optional.get();
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS);
-        if (record.platedSubmission) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.place_on_table"), true);
-            return;
-        }
-        if (!record.playerId.equals(player.getUUID())) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.spectator_submit"), true);
-            return;
-        }
-        if (record.state != CompetitionState.ROUND_ACTIVE) {
-            player.displayClientMessage(Component.translatable("message.culinary_cataclysm.not_accepting"), true);
-            return;
-        }
-        dishSubmission.submitRound(player, data, record, event.getItemStack());
+        player.displayClientMessage(Component.translatable("message.culinary_cataclysm.place_on_table"), true);
     }
 
     public void onIncomingDamage(LivingIncomingDamageEvent event) {
@@ -258,14 +234,14 @@ public final class IgnisChapter {
     public void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         dishSubmission.onLogout(player.getUUID());
-        CompetitionSavedData data = CompetitionSavedData.get(player.serverLevel());
+        IgnisChallengeRegistry data = IgnisChallengeRegistry.get(player.serverLevel());
         data.byPlayer(player.getUUID()).ifPresent(record -> {
             // 仅未提交的活跃料理事务需要停下；评审、公布和清理均可安全继续。
             if (record.state == CompetitionState.ROUND_ACTIVE) {
                 record.interruptedState = CompetitionState.ROUND_ACTIVE;
                 record.state = CompetitionState.INTERRUPTED;
                 record.stateTicks = 0;
-                data.setDirty();
+                data.changed(record);
             }
         });
     }
@@ -280,10 +256,10 @@ public final class IgnisChapter {
         if (entity instanceof Mob mob) mob.stopInPlace();
     }
 
-    private static void transition(CompetitionSavedData data, CompetitionRecord record, CompetitionState state) {
+    private static void transition(IgnisChallengeRegistry data, CompetitionRecord record, CompetitionState state) {
         record.state = state;
         record.stateTicks = 0;
-        data.setDirty();
+        data.changed(record);
     }
 
 }
