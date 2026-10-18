@@ -24,6 +24,7 @@ public final class ChallengeStore extends SavedData {
 
     private final Map<UUID, Challenge> active = new LinkedHashMap<>();
     private final Map<UUID, ChallengeHistory> history = new LinkedHashMap<>();
+    private final ActiveChallengeIndex index = new ActiveChallengeIndex();
 
     public static ChallengeStore get(ServerLevel level) {
         ServerLevel storageLevel = level.getServer().getLevel(Level.OVERWORLD);
@@ -34,6 +35,8 @@ public final class ChallengeStore extends SavedData {
     public Collection<Challenge> active() { return java.util.List.copyOf(active.values()); }
     public Collection<ChallengeHistory> history() { return java.util.List.copyOf(history.values()); }
     public Optional<Challenge> byId(UUID id) { return Optional.ofNullable(active.get(id)); }
+    public Optional<Challenge> byPlayer(UUID playerId) { return index.byPlayer(playerId).flatMap(this::byId); }
+    public Optional<Challenge> byBoss(UUID bossId) { return index.byBoss(bossId).flatMap(this::byId); }
     public Optional<ChallengeHistory> historical(UUID id) { return Optional.ofNullable(history.get(id)); }
     public boolean contains(UUID id) { return active.containsKey(id) || history.containsKey(id); }
 
@@ -41,12 +44,22 @@ public final class ChallengeStore extends SavedData {
         if (challenge.lifecycle() == ChallengeLifecycle.ENDED || history.containsKey(challenge.id())) {
             throw new IllegalArgumentException("Cannot activate ended or archived challenge " + challenge.id());
         }
+        index.replace(active.get(challenge.id()), challenge);
         active.put(challenge.id(), challenge);
         setDirty();
     }
 
+    /** Chapters replay their persisted Boss associations after the active records are loaded. */
+    public void associateBoss(UUID challengeId, UUID bossId) {
+        if (!active.containsKey(challengeId)) {
+            throw new IllegalArgumentException("Boss association has no active challenge " + challengeId);
+        }
+        index.associateBoss(challengeId, bossId);
+    }
+
     public void archive(ChallengeHistory record) {
-        active.remove(record.id());
+        Challenge removed = active.remove(record.id());
+        if (removed != null) index.remove(removed);
         history.put(record.id(), record);
         setDirty();
     }
@@ -82,6 +95,7 @@ public final class ChallengeStore extends SavedData {
                 throw new IllegalStateException("Duplicate challenge history " + record.id());
             }
         }
+        store.index.rebuild(store.active.values());
         return store;
     }
 }

@@ -42,6 +42,7 @@ public final class CompetitionSavedData {
             if (IgnisChallengeCodec.CHAPTER_ID.equals(challenge.chapterId())) {
                 CompetitionRecord record = IgnisChallengeCodec.toRecord(challenge);
                 competitions.put(record.competitionId, record);
+                store.associateBoss(record.competitionId, record.ignisId);
             }
         }
     }
@@ -59,6 +60,9 @@ public final class CompetitionSavedData {
         if (store.contains(record.competitionId)) {
             throw new IllegalArgumentException("Challenge ID already exists: " + record.competitionId);
         }
+        if (store.byBoss(record.ignisId).isPresent()) {
+            throw new IllegalArgumentException("Boss already belongs to an active challenge " + record.ignisId);
+        }
         commit(record);
         competitions.put(record.competitionId, record);
     }
@@ -68,11 +72,11 @@ public final class CompetitionSavedData {
     }
 
     public Optional<CompetitionRecord> byPlayer(UUID playerId) {
-        return competitions.values().stream().filter(record -> record.playerId.equals(playerId)).findFirst();
+        return store.byPlayer(playerId).flatMap(challenge -> byId(challenge.id()));
     }
 
     public Optional<CompetitionRecord> byIgnis(UUID ignisId) {
-        return competitions.values().stream().filter(record -> record.ignisId.equals(ignisId)).findFirst();
+        return store.byBoss(ignisId).flatMap(challenge -> byId(challenge.id()));
     }
 
     public Optional<CompetitionRecord> at(ResourceLocation dimension, BlockPos pos) {
@@ -100,6 +104,7 @@ public final class CompetitionSavedData {
             store.archive(IgnisChallengeCodec.history(challenge, record));
         } else {
             store.put(challenge);
+            store.associateBoss(challenge.id(), record.ignisId);
         }
     }
 

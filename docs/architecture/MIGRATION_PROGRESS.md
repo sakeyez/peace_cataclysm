@@ -22,3 +22,11 @@
 - `新的世界 (10)` 含一条已完成、一条中断中的比赛。服务端成功加载依赖与旧世界；执行 `save-all flush` 后生成 `culinary_cataclysm_challenges.dat`，得到 Active 1、History 1。正常停服、重启、再保存后仍为 Active 1、History 1；Ignis 的身份、恢复阶段、施工游标、厨师库存和证据数量匹配旧记录，重复导入不会增加记录。
 - `新的世界 (8)` 的旧比赛处于 `CLEANUP`。隔离服务端加载、保存、正常停服成功；新 Store 为 Active 1、History 0，清理阶段和游标匹配旧记录。此副本没有模拟玩家进入或清理直至结束。
 - 再次执行 `build` 与两份已写盘 Store 的针对性读取检查，均通过。上述证据验证 M2 的服务器存档迁移、保存和一次重启；不替代客户端画面、玩家交互或奖励结算的游戏内验证。
+
+## 2026-10-17：M3 活动挑战派生索引
+
+- `ActiveChallengeIndex` 只持有 `player UUID → challenge UUID`、`Boss UUID → challenge UUID` 及 Boss 的反向关联，用于清除旧关联；不保存 Challenge 对象，也不写入 NBT。`ChallengeStore` 从 Active 记录重建玩家索引，并在 put/归档时更新。一个玩家同时只允许一场活动挑战，冲突由 Store 拒绝；历史记录不进入索引。
+- Boss UUID 仍由 Ignis 的版本化章节数据保存。`CompetitionSavedData` 在加载活动 Ignis 记录时重放 Boss 关联，创建和提交记录时同步更新，归档时移除。公共 Store 与 Index 不解析 Ignis 章节字段；如果未来有其他章节，也由该章节重放自己的 Boss 关联。Boss 查询须在所属章节完成关联重建后使用。
+- Ignis 的 `byPlayer()` 和 `byIgnis()` 改为通过 Store/Index 找活动 Challenge ID；创建前也检查公共玩家/Boss 索引，避免其他章节已占用时先改变 Boss 状态。区域查询仍只遍历活动 Ignis 记录并执行 `containsArena(pos)`。没有增加 Chunk 索引，因为还没有区域查询热点证据。兼容视图的 tick 仍只遍历活动记录。
+- 自动检查覆盖创建、迁移、玩家和 Boss 查询、关联替换、唯一性冲突、归档清除、保存/读取后重建，并以旧存档样本检查重建结果。服务端重启及事件保护的运行证据另行记录；单纯编译通过不代表这些行为已在游戏内验证。
+- 在隔离目录 `.tools/m3-runtime-20261017` 中复制 M2 已迁移世界，使用 M3 代码启动专用服务器、`save-all flush`、正常停服并再次启动/保存/停服，均成功。重启后磁盘 Store 仍是 Active 1、History 1；针对写盘 NBT 的检查通过，玩家映射由 Active 重建，Boss 映射能由 Ignis 章节数据重放。原世界未作为服务器运行目录。本轮没有玩家在线交互或方块保护事件的游戏内验证。

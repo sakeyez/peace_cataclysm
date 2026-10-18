@@ -43,10 +43,22 @@ public final class ChallengeMigrationCheck {
         ChallengeStore store = new ChallengeStore();
         IgnisLegacyMigration.importInto(store, List.of(record));
         require(store.contains(record.competitionId) && store.active().size() == 1, "first import failed");
+        require(store.byPlayer(record.playerId).orElseThrow().id().equals(record.competitionId),
+                "player index missing after migration");
+        store.associateBoss(record.competitionId, record.ignisId);
+        require(store.byBoss(record.ignisId).orElseThrow().id().equals(record.competitionId),
+                "boss association missing after migration");
         IgnisLegacyMigration.importInto(store, List.of(record));
         require(store.active().size() == 1, "repeat import duplicated an active challenge");
         store = ChallengeStore.load(store.save(new CompoundTag(), null), null);
         require(store.active().size() == 1 && store.history().isEmpty(), "active store round-trip failed");
+        require(store.byPlayer(record.playerId).orElseThrow().id().equals(record.competitionId),
+                "player index not rebuilt on load");
+        require(store.byBoss(record.ignisId).isEmpty(), "runtime boss index was persisted");
+        store.associateBoss(record.competitionId, IgnisChallengeCodec.toRecord(
+                store.byId(record.competitionId).orElseThrow()).ignisId);
+        require(store.byBoss(record.ignisId).orElseThrow().id().equals(record.competitionId),
+                "boss association not restored from chapter data");
 
         record.state = CompetitionState.INTERRUPTED;
         record.interruptedState = CompetitionState.CLEANUP;
@@ -58,6 +70,8 @@ public final class ChallengeMigrationCheck {
         Challenge completed = IgnisChallengeCodec.fromRecord(record, pausedCleanup, 30);
         store.archive(IgnisChallengeCodec.history(completed, record));
         require(store.active().isEmpty() && store.history().size() == 1, "archive failed");
+        require(store.byPlayer(record.playerId).isEmpty() && store.byBoss(record.ignisId).isEmpty(),
+                "archived challenge stayed in active index");
         CompoundTag saved = store.save(new CompoundTag(), null);
         CompoundTag history = saved.getList("History", 10).getCompound(0);
         require(!history.contains("ChapterData") && !history.contains("BlazeInventory"), "runtime state leaked into history");
@@ -75,12 +89,79 @@ public final class ChallengeMigrationCheck {
         IgnisLegacyMigration.importInto(store, List.of(oldCompleted));
         require(store.active().isEmpty() && store.historical(oldCompleted.competitionId).orElseThrow().result()
                 == ChallengeResult.SUCCESS, "completed legacy result was not archived");
+        verifyIndexUpdates(dimension);
         if (args.length == 3 && args[0].equals("--migrated")) {
             verifyMigratedFile(Path.of(args[1]), Path.of(args[2]));
         } else {
             for (String file : args) verifyRealLegacyFile(Path.of(file));
         }
         System.out.println("Challenge migration checks passed");
+    }
+
+    private static void verifyIndexUpdates(ResourceLocation dimension) {
+        ChallengeStore store = new ChallengeStore();
+        UUID challengeId = UUID.randomUUID();
+        UUID firstPlayer = UUID.randomUUID();
+        UUID nextPlayer = UUID.randomUUID();
+        UUID firstBoss = UUID.randomUUID();
+        UUID nextBoss = UUID.randomUUID();
+        Challenge first = indexChallenge(challengeId, firstPlayer, dimension);
+        store.put(first);
+        store.associateBoss(challengeId, firstBoss);
+        require(store.byPlayer(firstPlayer).orElseThrow().id().equals(challengeId), "initial player index");
+        require(store.byBoss(firstBoss).orElseThrow().id().equals(challengeId), "initial boss index");
+
+        Challenge replacement = indexChallenge(challengeId, nextPlayer, dimension);
+        store.put(replacement);
+        store.associateBoss(challengeId, nextBoss);
+        require(store.byPlayer(firstPlayer).isEmpty() && store.byBoss(firstBoss).isEmpty(),
+                "stale lookup survived association change");
+        require(store.byPlayer(nextPlayer).orElseThrow().id().equals(challengeId)
+                && store.byBoss(nextBoss).orElseThrow().id().equals(challengeId),
+                "new associations are missing");
+
+        UUID conflictingId = UUID.randomUUID();
+        expectRejected(() -> store.put(indexChallenge(conflictingId, nextPlayer, dimension)),
+                "second active challenge claimed the same player");
+        require(store.byId(conflictingId).isEmpty(), "rejected player conflict changed the store");
+        Challenge independent = indexChallenge(conflictingId, UUID.randomUUID(), dimension);
+        store.put(independent);
+        expectRejected(() -> store.associateBoss(conflictingId, nextBoss),
+                "second active challenge claimed the same boss");
+        require(store.byBoss(nextBoss).orElseThrow().id().equals(challengeId),
+                "rejected boss conflict changed the index");
+
+        CompoundTag saved = store.save(new CompoundTag(), null);
+        require(!saved.contains("ActiveChallengeIndex") && !saved.contains("ByPlayer")
+                && !saved.contains("ByBoss"), "derived index leaked into SavedData");
+        ChallengeStore loaded = ChallengeStore.load(saved, null);
+        require(loaded.byPlayer(nextPlayer).orElseThrow().id().equals(challengeId),
+                "updated player index not rebuilt on load");
+        require(loaded.byBoss(nextBoss).isEmpty(), "boss index persisted across load");
+        loaded.associateBoss(challengeId, nextBoss);
+        require(loaded.byBoss(nextBoss).orElseThrow().id().equals(challengeId),
+                "chapter boss association could not be replayed");
+        Challenge ended = new Challenge(challengeId, replacement.chapterId(), dimension,
+                replacement.participants(), ChallengeLifecycle.ENDED, ChallengeResult.ABORTED,
+                0, 0, 1, 1, replacement.chapterDataVersion(), replacement.chapterData());
+        loaded.archive(new ChallengeHistory(ended, new CompoundTag()));
+        require(loaded.byPlayer(nextPlayer).isEmpty() && loaded.byBoss(nextBoss).isEmpty(),
+                "archive left stale player or boss index entries");
+    }
+
+    private static Challenge indexChallenge(UUID id, UUID playerId, ResourceLocation dimension) {
+        return new Challenge(id, IgnisChallengeCodec.CHAPTER_ID, dimension, List.of(playerId),
+                ChallengeLifecycle.RUNNING, ChallengeResult.UNRESOLVED,
+                0, 0, 0, 0, IgnisChallengeCodec.CHAPTER_DATA_VERSION, new CompoundTag());
+    }
+
+    private static void expectRejected(Runnable action, String message) {
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
+        throw new AssertionError(message);
     }
 
     private static void verifyMigratedFile(Path migratedPath, Path legacyPath) throws IOException {
@@ -109,6 +190,12 @@ public final class ChallengeMigrationCheck {
                     require(historical.result() == IgnisChallengeCodec.fromRecord(old, null, 0).result(),
                             "cleanup result changed during runtime migration");
                 } else {
+                    require(store.byPlayer(old.playerId).orElseThrow().id().equals(old.competitionId),
+                            "runtime player index not rebuilt from active record");
+                    require(store.byBoss(old.ignisId).isEmpty(), "runtime boss index should be derived");
+                    store.associateBoss(old.competitionId, IgnisChallengeCodec.toRecord(challenge).ignisId);
+                    require(store.byBoss(old.ignisId).orElseThrow().id().equals(old.competitionId),
+                            "runtime boss association could not be restored");
                     require(challenge.result() == IgnisChallengeCodec.fromRecord(old, null, 0).result(),
                             "active runtime result changed");
                     CompetitionRecord restored = IgnisChallengeCodec.toRecord(challenge);
@@ -150,8 +237,18 @@ public final class ChallengeMigrationCheck {
         for (CompetitionRecord record : records) {
             if (record.state == CompetitionState.COMPLETED) {
                 require(store.historical(record.competitionId).isPresent(), "legacy history missing: " + path);
+                require(store.byPlayer(record.playerId).map(challenge -> !challenge.id().equals(record.competitionId))
+                        .orElse(true), "legacy history entered player index: " + path);
+                require(store.byBoss(record.ignisId).map(challenge -> !challenge.id().equals(record.competitionId))
+                        .orElse(true), "legacy history entered boss index: " + path);
             } else {
-                CompetitionRecord restored = IgnisChallengeCodec.toRecord(store.byId(record.competitionId).orElseThrow());
+                Challenge activeChallenge = store.byId(record.competitionId).orElseThrow();
+                require(store.byPlayer(record.playerId).orElseThrow().id().equals(record.competitionId),
+                        "legacy player index not rebuilt: " + path);
+                CompetitionRecord restored = IgnisChallengeCodec.toRecord(activeChallenge);
+                store.associateBoss(activeChallenge.id(), restored.ignisId);
+                require(store.byBoss(record.ignisId).orElseThrow().id().equals(record.competitionId),
+                        "legacy boss association not restored: " + path);
                 CompoundTag before = record.save();
                 CompoundTag after = restored.save();
                 long[] beforePreserved = before.getLongArray("PreservedBattlefieldBlocks");

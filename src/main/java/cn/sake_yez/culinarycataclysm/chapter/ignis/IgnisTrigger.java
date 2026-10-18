@@ -2,6 +2,7 @@ package cn.sake_yez.culinarycataclysm.chapter.ignis;
 
 import cn.sake_yez.culinarycataclysm.boss.IgnisPeaceController;
 import cn.sake_yez.culinarycataclysm.build.ArenaPlacementValidator;
+import cn.sake_yez.culinarycataclysm.challenge.ChallengeStore;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionRecord;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionSavedData;
 import cn.sake_yez.culinarycataclysm.competition.CompetitionState;
@@ -80,7 +81,8 @@ public final class IgnisTrigger {
 
     private void startFromAltar(ServerLevel level, ServerPlayer player, Entity ignis, BlockPos altarPos) {
         CompetitionSavedData data = CompetitionSavedData.get(level);
-        if (data.byPlayer(player.getUUID()).isPresent()) {
+        ChallengeStore store = ChallengeStore.get(level);
+        if (store.byPlayer(player.getUUID()).isPresent() || store.byBoss(ignis.getUUID()).isPresent()) {
             player.sendSystemMessage(Component.translatable("message.culinary_cataclysm.already_active"));
             return;
         }
